@@ -104,7 +104,7 @@
 ```markdown
 | 类型 | 所属知识领域(domain) | Scope (范围 / 范畴) | Global / User / Project (项目) | 条目 | entry point (file path) | references (file path) |
 |---|---|---|---|---|---|---|
-| rules | Durable Prefs | 用户偏好 | User | 提交信息用 Conventional Commits | - | <repo_root>/CLAUDE.md |
+| rules | DurablePrefs | user | user | 提交信息用 Conventional Commits | - | <repo_root>/CLAUDE.md |
 ```
 
 渲染后必须通过 **Markdown 语法静态检查**(表格列数一致、无未闭合管道、`entry` 内的 `|` 已转义)。

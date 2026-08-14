@@ -82,6 +82,8 @@ interface MemoryEntry {
 - **真相源 JSONL**:`remember` = 追加一行(校验 schema);`forget` = 删除匹配行;`lessons` 合并 = 替换行。所有写都改 `.remember.jsonl`。
 - **渲染投影 MD**:每次写 jsonl 后,用纯函数 `renderMd(entries)` 重新生成同名 `.remember.md`(7 列表格),再跑 `checkMarkdown(md)` 静态检查(列数一致、`|` 转义、表格闭合)。
 - MD 永不解析、只生成——写逻辑只碰 JSONL,避免手写 md 表格解析器的脆弱性。
+- **forget 跨文件定位(盲点修正)**:条目按命名(日期+分区)分散在多个文件里,不在「当天文件」。`forget` 因此**遍历全部可见的 `.remember.jsonl`**,对受影响的文件重写 jsonl + 重渲染 md,而非只改当天文件。
+- **空表语义(盲点修正)**:`forget` 删空某文件后,仍写出「表头 + 分隔行」的空表格(保留文件骨架),**不删除文件**——保持「.md 与 .jsonl 一一对应」的命名不变量。
 
 ### 6.1 纯逻辑模块(不 import cordis,阶段 2 最先实现并单测)
 
@@ -121,6 +123,7 @@ interface MemoryEntry {
 - **预热** = 读入各节点分配的记忆文件 + 绑定 v4-flash 调用器,组装成一个就绪的节点 team。
 - **生命周期**:`start`(组装 team)/ `stop`(释放 team)/ `restart`(重新组装)——经 slash command 控制;`warmupOnStart` 为真时插件启动自动预热。
 - 预热后、未 stop 时,recall 直接 fan-out,不再等待组装 / 重读磁盘。
+- **预热键与惰性语义(盲点修正)**:预热要读项目级记忆文件,而插件启动时没有 agent/cwd。故 team 按 **project root 分键缓存**;`warmupOnStart` 只预热用户级(无 cwd)team,项目级 team 在**首次 recall 时惰性预热**。`ensureTeam(cwd)` 命中缓存即复用,未命中才组装。
 
 ### 召回流程
 
@@ -135,7 +138,7 @@ interface MemoryEntry {
 |---|---|---|
 | `remember` | `type` / `domain` / `scope` / `entry` / `entryPoint?` / `references?` | 校验枚举 → 追加 JSONL 行 → 重渲染 MD;`rules` 只增不减 |
 | `recall` | `query` | fan-out 到记忆节点 team → 聚合返回相关条目 |
-| `forget` | `entry`(精确匹配) | 删除 JSONL 匹配行 → 重渲染 MD;`rules` 删除需显式确认 |
+| `forget` | `entry`(精确匹配)/ `type?` / `confirm?` | **遍历全部可见文件**按 entry 匹配删除(条目可能不在当天文件)→ 重写受影响 jsonl+md;`rules` 删除须 `confirm: true`,`type` 可限定类型 |
 
 **提取原则由模型执行**:`remember` 的 description 写入「只记 rules/lessons 两类,禁止流水账/思考过程/代码实现/凭据」(来自 concept.md §4)。
 
@@ -157,7 +160,9 @@ interface MemoryEntry {
 | `maxNodeKb` | `600`(Kb) | 每记忆节点最多负责的记忆文本大小 |
 | `recallTopK` | `10` | recall 返回的最大条目数 |
 | `rerankPrompt` | 见下 | 聚合阶段重排序候选的提示词模板 |
-| `warmupOnStart` | `true` | 插件启动时是否自动预热 team |
+| `warmupOnStart` | `true` | 插件启动时是否自动预热用户级 team |
+| `provider` | `deepseek-official` | 召回调用的 LLM provider(`ctx.llm.stream` 的 `GenerateOptions` **强制要求 provider**) |
+| `model` | `deepseek-v4-flash` | 召回节点与重排序所用的模型 |
 
 **`rerankPrompt` 默认模板**(通用重排序提示词,聚合阶段对去重后的候选做相关度排序):
 
