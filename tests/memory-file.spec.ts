@@ -16,7 +16,7 @@ function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     type: 'rules',
     domain: 'DurablePrefs',
-    scope: 'user',
+    scope: '全项目',
     layer: 'user',
     entry: '提交信息用 Conventional Commits',
     entryPoint: '-',
@@ -67,7 +67,7 @@ describe('appendEntry + discover', () => {
     expect(md).toContain('提交信息用 Conventional Commits')
   })
 
-  it('discovers the written entry via user scope', () => {
+  it('discovers the written entry via user layer', () => {
     appendEntry(project, entry())
     const entries = discoverEntries(project)
     expect(entries).toHaveLength(1)
@@ -123,13 +123,13 @@ describe('project-layer precedence', () => {
     const base = '2026-08-13.rules.remember'
     writeFileSync(
       join(userDir, `${base}.jsonl`),
-      '{"type":"rules","domain":"Style","scope":"user","layer":"user","entry":"用户层条目","entryPoint":"-","references":"-"}\n',
+      '{"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"用户层条目","entryPoint":"-","references":"-"}\n',
       'utf8',
     )
     // 项目层同名文件覆盖。
     writeFileSync(
       join(project, '.dsh', 'memory', `${base}.jsonl`),
-      '{"type":"rules","domain":"Style","scope":"project","layer":"project","entry":"项目层条目","entryPoint":"-","references":"-"}\n',
+      '{"type":"rules","domain":"Style","scope":"全项目","layer":"project","entry":"项目层条目","entryPoint":"-","references":"-"}\n',
       'utf8',
     )
     const entries = discoverEntries(project)

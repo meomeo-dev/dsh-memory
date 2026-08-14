@@ -15,7 +15,7 @@ function entry(overrides: Record<string, unknown> = {}): MemoryEntry {
   return {
     type: 'rules',
     domain: 'DurablePrefs',
-    scope: 'user',
+    scope: '全项目',
     layer: 'user',
     entry: '提交信息用 Conventional Commits',
     entryPoint: '-',
@@ -61,14 +61,14 @@ describe('validateEntry', () => {
     const result = validateEntry({
       type: 'lessons',
       domain: 'PromotedPitfalls',
-      scope: 'project',
+      scope: '全项目',
       layer: 'project',
       entry: '某 API 已改签名',
     })
     expect(result).toEqual({
       type: 'lessons',
       domain: 'PromotedPitfalls',
-      scope: 'project',
+      scope: '全项目',
       layer: 'project',
       entry: '某 API 已改签名',
       entryPoint: '-',
@@ -96,7 +96,7 @@ describe('validateEntry', () => {
 
 describe('parseEntry', () => {
   it('parses a valid JSON line', () => {
-    const result = parseEntry('{"type":"rules","domain":"Style","scope":"user","layer":"user","entry":"两空格缩进"}', 3)
+    const result = parseEntry('{"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"两空格缩进"}', 3)
     expect(result.entryPoint).toBe('-')
     expect(result.references).toBe('-')
   })

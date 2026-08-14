@@ -78,10 +78,10 @@ export function memoryWriteRoots(cwd: string): MemoryWriteRoots {
   }
 }
 
-/** 由 `entry.scope` 选写根:project → 项目写根,否则用户写根。 */
-function writeRootFor(cwd: string, scope: MemoryEntry['scope']): string {
+/** 由 `entry.layer` 选写根:project → 项目写根,否则用户写根。 */
+function writeRootFor(cwd: string, layer: MemoryEntry['layer']): string {
   const roots = memoryWriteRoots(cwd)
-  return scope === 'project' ? roots.project : roots.user
+  return layer === 'project' ? roots.project : roots.user
 }
 
 /** 今天的本地日期 `YYYY-MM-DD`。 */
@@ -149,7 +149,7 @@ function writeFilePair(jsonlPath: string, mdPath: string, entries: readonly Memo
  * @returns 落盘的 jsonl / md 路径。
  */
 export function appendEntry(cwd: string, entry: MemoryEntry): { jsonlPath: string; mdPath: string } {
-  const dir = writeRootFor(cwd, entry.scope)
+  const dir = writeRootFor(cwd, entry.layer)
   const { jsonlPath, mdPath } = todayPaths(dir, entry.type)
   const existing = readJsonl(jsonlPath)
   writeFilePair(jsonlPath, mdPath, [...existing, entry])

@@ -28,6 +28,12 @@
 
 一条记忆活动 = **信息(Domain)对现实的操作(Scope)**。`domain` 决定「这是关于什么的记忆」,`scope` 决定「这条记忆在多大范围内生效」。
 
+`domain` 与 `scope` 是**正交的两个定位维度,成对出现**——一条记忆总是同时具有「关于什么领域(domain)」和「影响什么范围(scope)」,二者缺一不可,共同定位这条记忆。
+
+`scope` 的取值是**自由文本**(具体子系统 / 模块名,如「全项目」「Web UI」「Provider 接入」「样本库」),随项目变化,不做全局枚举;`domain` 才是 21 个 closed 枚举(见 §3)。
+
+> **三者关系(结论)**:`domain` 与 `scope` 是**语义定位的正交对**,成对出现、共同定位一条记忆;`layer` 是**存储元数据**,只决定物理落点(Global / User / Project,见 §8),**不参与语义定位**。
+
 ## 3. 长期记忆的 Domain(知识领域清单)
 
 记忆必须归入以下 domain 之一(closed 枚举,新 domain 需显式扩展):
@@ -35,7 +41,7 @@
 | # | Domain | 中文 | 例(记忆主题) |
 |---|---|---|---|
 | 1 | Output Contract | 输出契约 | 某接口的响应字段、必填项 |
-| 2 | Tool Governance | 工具作用域治理 | 某工具在什么 scope 可用/禁用 |
+| 2 | Tool Governance | 工具作用域治理 | 某工具在什么作用域可用/禁用 |
 | 3 | Red Lines | 不可逆红线 | 绝不删除生产数据、绝不裸 `--force` |
 | 4 | Invariants | 项目不变量 | 如 R1/R2/R3 这类不可违反的约定 |
 | 5 | Naming Bijection | 命名机械对应 | issue↔分支↔worktree 三者命名映射 |
@@ -94,17 +100,17 @@
 **JSONL 记录 schema**(一行一条):
 
 ```json
-{"type":"rules","domain":"DurablePrefs","scope":"user","layer":"user","entry":"提交信息用 Conventional Commits","entryPoint":"-","references":"<repo_root>/CLAUDE.md"}
+{"type":"rules","domain":"DurablePrefs","scope":"全项目","layer":"user","entry":"提交信息用 Conventional Commits","entryPoint":"-","references":"<repo_root>/CLAUDE.md"}
 ```
 
-字段与旧 7 列一一对应:`type` / `domain` / `scope` / `layer` / `entry` / `entryPoint` / `references`。
+字段与 7 列一一对应:`type` / `domain` / `scope` / `layer` / `entry` / `entryPoint` / `references`。其中 `domain` 与 `scope` 是**语义定位的正交对**(共同定位一条记忆),`layer` 是**存储元数据**(不参与语义定位)。
 
 **MD 渲染**(纯函数,由 jsonl 派生,7 列):
 
 ```markdown
-| 类型 | 所属知识领域(domain) | Scope (范围 / 范畴) | Global / User / Project (项目) | 条目 | entry point (file path) | references (file path) |
+| 类型 | 所属知识领域(domain) | 影响范围 (Scope) | Layer (落点层) | 条目 | entry point (file path) | references (file path) |
 |---|---|---|---|---|---|---|
-| rules | DurablePrefs | user | user | 提交信息用 Conventional Commits | - | <repo_root>/CLAUDE.md |
+| rules | DurablePrefs | 全项目 | user | 提交信息用 Conventional Commits | - | <repo_root>/CLAUDE.md |
 ```
 
 渲染后必须通过 **Markdown 语法静态检查**(表格列数一致、无未闭合管道、`entry` 内的 `|` 已转义)。
@@ -116,19 +122,19 @@ memory/YYYY-MM-DD[.<partition>].<memory_type>.remember.{jsonl|md}
 ```
 
 - `YYYY-MM-DD`:写入日期(按天分文件)。
-- `<memory_type>`:**强制**,就是 `rules` 或 `lessons` 二者之一。**不是** scope(Global/User/Project)、**不是** domain(21 类)——type 维度和 scope/domain 是正交的独立字段,不要在文件名里混用。
-- `<partition>`:**可选**自由前缀(kebab-case),用于把同类记忆拆成多个文件分片(单个文件不宜无限大)。它是自由分片标识,不是 scope/domain 枚举。
+- `<memory_type>`:**强制**,就是 `rules` 或 `lessons` 二者之一。**不是** layer(Global/User/Project)、**不是** domain(21 类)——type 维度和 scope/domain/layer 是正交的独立字段,不要在文件名里混用。
+- `<partition>`:**可选**自由前缀(kebab-case),用于把同类记忆拆成多个文件分片(单个文件不宜无限大)。它是自由分片标识,不是 scope/domain/layer 枚举。
 - 每个 `.remember.md` 必有同名 `.remember.jsonl`,一一对应。
 
 示例:
 - `memory/2026-08-13.rules.remember.jsonl` + `.md`(无分区)
-- `memory/2026-08-13.user.rules.remember.jsonl` + `.md`(partition = `user`,仅作分片标识,与 scope 字段无关)
+- `memory/2026-08-13.user.rules.remember.jsonl` + `.md`(partition = `user`,仅作分片标识,与 scope / layer 字段无关)
 
-## 8. Scope 分层(Global / User / Project)
+## 8. Layer 分层(落点层:Global / User / Project)
 
-记忆按生效范围分三层,目录发现时按「就近覆盖」:
+记忆按**落点层(layer)**分三层物理存储,目录发现时按「就近覆盖」。这是 layer(物理存储位置),**不是** scope(影响范围)——scope 见 §2,是「操作或影响的边界(具体子系统 / 模块)」。
 
-| 层级 | 落点 | 含义 |
+| 层(layer) | 落点 | 含义 |
 |---|---|---|
 | Global | 全局 | 跨所有项目生效(几乎不用) |
 | User | `~/.dsh/memory/` 或 `~/.agents/memory/` | 用户级,跨项目 |

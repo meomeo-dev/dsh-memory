@@ -242,7 +242,7 @@ async function handleCommand(
 }
 
 /** remember 工具:校验枚举 → 追加 JSONL 行 → 重渲染 MD;rules 只增不减。 */
-const REMEMBER_DESCRIPTION = 'Write one long-term memory entry. Only record rules (durable preferences, constraints, consensus) or lessons (past pitfalls, API changes); never log the step-by-step transcript, reasoning process, code implementation, or credentials. Provide type, domain, scope, and the one-sentence entry; entryPoint and references default to "-".'
+const REMEMBER_DESCRIPTION = 'Write one long-term memory entry. Only record rules (durable preferences, constraints, consensus) or lessons (past pitfalls, API changes); never log the step-by-step transcript, reasoning process, code implementation, or credentials. Provide type, domain, scope (impacted subsystem/module, free text), layer (storage layer), and the one-sentence entry; entryPoint and references default to "-".'
 
 /** recall 工具:fan-out 到记忆节点 team → 聚合返回相关条目。 */
 const RECALL_DESCRIPTION = 'Recall relevant long-term memory entries for a query by fanning out to the warm memory-node team and aggregating the deduplicated, reranked results.'
@@ -262,7 +262,8 @@ function registerTools(ctx: Context, runtime: Runtime): void {
     parameters: {
       type: { type: 'string', required: true, enum: ['rules', 'lessons'], description: 'Memory type: rules or lessons.' },
       domain: { type: 'string', required: true, enum: [...DOMAINS], description: 'Knowledge domain (one of 21 ids).' },
-      scope: { type: 'string', required: true, enum: ['global', 'user', 'project'], description: 'Effective scope; project writes under the repo.' },
+      scope: { type: 'string', required: true, description: 'Impacted scope: which subsystem or module this memory affects (free text, e.g. "全项目", "Web UI", "Provider 接入").' },
+      layer: { type: 'string', required: true, enum: ['global', 'user', 'project'], description: 'Storage layer: project writes under the repo, user under ~/.dsh.' },
       entry: { type: 'string', required: true, description: 'One-sentence entry text.' },
       entryPoint: { type: 'string', description: 'Associated entry-point file path, or omit.' },
       references: { type: 'string', description: 'Associated reference file path, or omit.' },
@@ -298,7 +299,7 @@ function registerTools(ctx: Context, runtime: Runtime): void {
         type,
         domain: args.domain,
         scope: args.scope,
-        layer: args.scope,
+        layer: args.layer,
         entry: args.entry,
       }
       if (args.entryPoint !== undefined) candidate.entryPoint = args.entryPoint

@@ -1,7 +1,7 @@
 # 设计文档:长期记忆(Long-Term Memory)插件
 
 > **已确认决策(阶段 0/1 拍板)**
-> 1. **文件名 type 维度** = `rules` / `lessons`,**不是** scope、不是 domain;`<partition>` 是可选自由分片前缀(见 concept.md §7)。
+> 1. **文件名 type 维度** = `rules` / `lessons`,**不是** layer(Global/User/Project)、不是 domain;`<partition>` 是可选自由分片前缀(见 concept.md §7)。
 > 2. **记忆节点实现** = 直接 `ctx.llm.stream({ model: 'deepseek-v4-flash' })` 轻量调用,不走完整 `ctx.subagents` 子代理。
 > 3. **预热** = 提前把 `llm` 调用器 + 记忆文件组装成「就绪的节点 team」;进程不退且未 stop,后续 recall 直接 fan-out,不再等待组装 / 重读磁盘。
 > 4. **节点容量可配置**:每节点 ≤600Kb(默认,经 slash command 改,单位 Kb);一个节点可装载多个记忆文件。
@@ -53,7 +53,7 @@ DeepSeek Harness 已有 `session-reference`(整段历史会话的有界引用),�
 - 项目根由 `.git` 标记向上探测。
 - 文件按「日期 + 分区 + 类型」天然可分片,正是记忆节点分区的依据。
 
-**写根**:`remember` 按 `scope` 参数决定写 `~/.dsh/memory/`(user)或 `<repo>/.dsh/memory/`(project)。
+**写根**:`remember` 按 `layer` 参数决定写 `~/.dsh/memory/`(user)或 `<repo>/.dsh/memory/`(project)。`scope`(影响范围)是自由文本,不决定落点。
 
 ## 5. 数据模型
 
@@ -63,8 +63,8 @@ DeepSeek Harness 已有 `session-reference`(整段历史会话的有界引用),�
 interface MemoryEntry {
   type: 'rules' | 'lessons'          // 长期记忆只含两类,不含 state/todo
   domain: DomainId                   // 21 个 closed 枚举之一,见 concept.md §3
-  scope: 'global' | 'user' | 'project'
-  layer: 'global' | 'user' | 'project'   // 落点层
+  scope: string                      // 影响范围:具体子系统 / 模块(自由文本);与 domain 正交成对
+  layer: 'global' | 'user' | 'project'   // 落点层(存储元数据,不参与语义定位)
   entry: string                      // 一句话条目
   entryPoint: string                 // file path 或 '-'
   references: string                 // file path 或 '-'
@@ -90,7 +90,7 @@ interface MemoryEntry {
 这是全插件最稳、最不依赖 `v4-flash` 实时调用的部分,开发顺序上最先做。三个纯函数模块:
 
 **`schema.ts` — JSONL 逐行 schema 校验**
-- 用 schemastery 定义 `MemoryEntry` 的 schema(`type` ∈ rules/lessons、`domain` ∈ 21 枚举、`scope` ∈ global/user/project、`layer` ∈ global/user/project、`entry` 非空、`entryPoint`/`references` 缺省 `-`)。
+- 用 schemastery 定义 `MemoryEntry` 的 schema(`type` ∈ rules/lessons、`domain` ∈ 21 枚举、`scope` 非空自由文本、`layer` ∈ global/user/project、`entry` 非空、`entryPoint`/`references` 缺省 `-`)。
 - 契约常量:`MEMORY_TYPES` / `DOMAINS` / `TABLE_HEADER` / `TABLE_SEPARATOR` / `FILE_NAME_RE`。
 - 导出 `parseEntry(line: string): MemoryEntry`(非法行抛带行号的清晰错误)与 `validateEntry(entry): MemoryEntry`。
 - schemastery 两坑照走:`Schema<T>` 断言 `as unknown as T`;常量显式标注 `: Schema<T>`。
@@ -136,7 +136,7 @@ interface MemoryEntry {
 
 | 工具 | 参数 | 行为 |
 |---|---|---|
-| `remember` | `type` / `domain` / `scope` / `entry` / `entryPoint?` / `references?` | 校验枚举 → 追加 JSONL 行 → 重渲染 MD;`rules` 只增不减 |
+| `remember` | `type` / `domain` / `scope`(影响范围)/ `layer`(落点层)/ `entry` / `entryPoint?` / `references?` | 校验枚举 → 追加 JSONL 行 → 重渲染 MD;`rules` 只增不减 |
 | `recall` | `query` | fan-out 到记忆节点 team → 聚合返回相关条目 |
 | `forget` | `entry`(精确匹配)/ `type?` / `confirm?` | **遍历全部可见文件**按 entry 匹配删除(条目可能不在当天文件)→ 重写受影响 jsonl+md;`rules` 删除须 `confirm: true`,`type` 可限定类型 |
 
@@ -189,7 +189,14 @@ interface MemoryEntry {
 
 - ❌ 整段会话全文检索(那是 `session-reference` 的活,§3)。
 - ❌ 向量化 / embedding 检索(先做 v4-flash 节点召回)。
-- ❌ 会话结束自动提取记忆(先做工具触发,模型提取)。
+- ❌ 会话结束自动提取记忆(先做工具触发,模型提取;自动提取的三形态见 §12)。
 - ❌ Web UI 记忆管理界面(先做 `/lmemory` 命令)。
 - ❌ state/todo 进长期记忆文件(它们是短期上下文,concept.md §4)。
 - ❌ 完整 `ctx.subagents` 子代理节点(先做 `ctx.llm.stream` 轻量调用,见顶部决策 2)。
+
+## 12. 独立扩展设计(是否实现各是独立决策)
+
+两个独立文档承载「主动记忆路径之外」的扩展能力,不动本文件的核心设计:
+
+- **自动提取(三种触发形态)** → [auto-extraction.md](auto-extraction.md):信号词 / 计数器 / 事件+计数器 三形态、dsh 事件落点、抽取窗口(与主会话上下文一致)、配置项与「model-visible ⟺ logged」约束。
+- **记忆寻址、目录与质检(Review)** → [memory-review.md](memory-review.md):唯一编号 id、catalog、切 `deepseek-v4-pro` 的 review 质检、`/lmemory review` 闭环、按 id 的 query/update/delete 工具。

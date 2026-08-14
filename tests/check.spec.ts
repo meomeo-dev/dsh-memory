@@ -7,7 +7,7 @@ function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     type: 'rules',
     domain: 'DurablePrefs',
-    scope: 'user',
+    scope: '全项目',
     layer: 'user',
     entry: '提交信息用 Conventional Commits',
     entryPoint: '-',

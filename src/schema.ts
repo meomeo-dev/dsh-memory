@@ -47,14 +47,11 @@ export const DOMAINS = [
 /** 一条记忆的知识领域 id。 */
 export type DomainId = (typeof DOMAINS)[number]
 
-/** 记忆的生效范围(scope)与落点层(layer),二者同取三层枚举但语义正交。 */
-export const SCOPES = ['global', 'user', 'project'] as const
+/** 记忆的落点层(layer):Global / User / Project 三层物理存储位置。 */
+export const LAYERS = ['global', 'user', 'project'] as const
 
-/** 一条记忆的生效范围。 */
-export type ScopeId = (typeof SCOPES)[number]
-
-/** 一条记忆的落点层(Global / User / Project)。 */
-export type LayerId = (typeof SCOPES)[number]
+/** 一条记忆的落点层 id。 */
+export type LayerId = (typeof LAYERS)[number]
 
 /**
  * 一条长期记忆条目的运行时形状(JSONL 一行,schema 归一化后)。
@@ -66,9 +63,9 @@ export interface MemoryEntry {
   readonly type: MemoryType
   /** 知识领域(21 个 closed 枚举之一)。 */
   readonly domain: DomainId
-  /** 生效范围:global / user / project。 */
-  readonly scope: ScopeId
-  /** 落点层:global / user / project。 */
+  /** 影响范围:作用于哪个子系统 / 模块(自由文本,非空);与 domain 正交成对。 */
+  readonly scope: string
+  /** 落点层:global / user / project(物理存储位置,元数据,不参与语义定位)。 */
   readonly layer: LayerId
   /** 一句话条目文本(非空)。 */
   readonly entry: string
@@ -81,12 +78,13 @@ export interface MemoryEntry {
 /**
  * 7 列 Markdown 表格表头(与 {@link MemoryEntry} 的 7 个字段一一对应:
  * type / domain / scope / layer / entry / entryPoint / references)。
+ * 其中 domain 与 scope 是语义定位的正交对,layer 是存储元数据。
  */
 export const TABLE_HEADER = [
   '类型',
   '所属知识领域 (domain)',
-  'Scope (范围 / 范畴)',
-  'Global / User / Project (项目)',
+  '影响范围 (Scope)',
+  'Layer (落点层)',
   '条目',
   'entry point (file path)',
   'references (file path)',
@@ -108,8 +106,8 @@ export const FILE_NAME_RE = /^\d{4}-\d{2}-\d{2}(?:\.[a-z0-9-]+)?\.(rules|lessons
 export const MEMORY_ENTRY_SCHEMA: Schema<MemoryEntry> = z.object({
   type: z.union([...MEMORY_TYPES]),
   domain: z.union([...DOMAINS]),
-  scope: z.union([...SCOPES]),
-  layer: z.union([...SCOPES]),
+  scope: z.string().min(1).required(),
+  layer: z.union([...LAYERS]),
   entry: z.string().min(1).required(),
   entryPoint: z.string().default('-'),
   references: z.string().default('-'),
