@@ -7,10 +7,12 @@ import {
   annealSessionStart,
   annealTurnStopping,
   buildTranscript,
+  containsSignalWord,
   deriveLayer,
   extractBoth,
   filterNovel,
   parseExtraction,
+  parseSignalWords,
 } from '../src/extract.js'
 import type { ExtractFn } from '../src/extract.js'
 
@@ -187,5 +189,21 @@ describe('deriveLayer', () => {
 
   it('returns user when no .git ancestor exists', () => {
     expect(deriveLayer(user)).toBe('user')
+  })
+})
+
+describe('signal words', () => {
+  it('splits on comma and 顿号, trims, and drops empty entries', () => {
+    expect(parseSignalWords('记住, 下次,偏好,，always,,never')).toEqual([
+      '记住', '下次', '偏好', 'always', 'never',
+    ])
+    expect(parseSignalWords('')).toEqual([])
+  })
+
+  it('matches case-insensitively as a substring', () => {
+    const words = parseSignalWords('记住,remember,always')
+    expect(containsSignalWord('请你记住用 pnpm', words)).toBe(true)
+    expect(containsSignalWord('REMEMBER this', words)).toBe(true)
+    expect(containsSignalWord('完全无关的一句话', words)).toBe(false)
   })
 })

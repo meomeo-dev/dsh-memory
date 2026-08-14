@@ -25,6 +25,7 @@ import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Session } from '@deepseek-ai/dsh-session'
 
 import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
@@ -52,15 +53,17 @@ import {
   stopTeams,
   teamStatus,
 } from './memory-runtime.js'
-import type { MemoryConfig, RuntimeState, TeamStatus } from './memory-runtime.js'
+import type { ExtractMode, MemoryConfig, RuntimeState, TeamStatus } from './memory-runtime.js'
 import {
   annealError,
   annealSessionStart,
   annealTurnStopping,
   buildTranscript,
+  containsSignalWord,
   deriveLayer,
   extractBoth,
   filterNovel,
+  parseSignalWords,
 } from './extract.js'
 import type { ExtractFn, TranscriptMessage } from './extract.js'
 import { USAGE, parseLmemoryCommand } from './command.js'
@@ -274,6 +277,11 @@ function blockText(block: ContentBlock): string {
   }
 }
 
+/** 从一组 content blocks 提取纯文本(拼接非空 text 块,供信号词匹配)。 */
+function blocksText(blocks: readonly ContentBlock[]): string {
+  return blocks.map(blockText).filter(chunk => chunk.length > 0).join(' ')
+}
+
 /** 把 `deriveMessages()` 的结果投影成抽取器输入(role + 文本,过滤空文本消息)。 */
 function toTranscript(messages: readonly Message[]): TranscriptMessage[] {
   const result: TranscriptMessage[] = []
@@ -293,12 +301,12 @@ function toTranscript(messages: readonly Message[]): TranscriptMessage[] {
  * 去重再追加,rules 重复由 store.append 的 duplicate 拒绝兜底。
  * @param ctx - 插件上下文。
  * @param runtime - 运行时状态(配置)。
- * @param agent - 触发抽取的 agent(取 session 上下文与 cwd)。
+ * @param session - 触发抽取的会话(取上下文与 cwd;agent.id 与 session.id 同值)。
  */
-async function runExtraction(ctx: Context, runtime: Runtime, agent: Agent): Promise<void> {
-  const cwd = agent.session.header.cwd
+async function runExtraction(ctx: Context, runtime: Runtime, session: Session): Promise<void> {
+  const cwd = session.header.cwd
   if (cwd === undefined) return
-  const transcript = buildTranscript(toTranscript(agent.session.deriveMessages()))
+  const transcript = buildTranscript(toTranscript(session.deriveMessages()))
   const rulesFn: ExtractFn = text => callFlash(ctx, runtime.config, runtime.config.extractRulesPrompt, text)
   const lessonsFn: ExtractFn = text => callFlash(ctx, runtime.config, runtime.config.extractLessonsPrompt, text)
   const result = await extractBoth(transcript, rulesFn, lessonsFn, (type, error) => warnNode(ctx, `extract ${type}`, error))
@@ -312,47 +320,73 @@ async function runExtraction(ctx: Context, runtime: Runtime, agent: Agent): Prom
   }
 }
 
-/** 触发抽取的公共守卫:v1 只在 `autoExtract` 开启且为 `event-counter` 形态时放行。 */
-function shouldAutoExtract(config: MemoryConfig): boolean {
-  return config.autoExtract && config.extractMode === 'event-counter'
-}
-
-/** 读某会话的退火冷却计数器(缺省 0)。 */
-function turnsSince(runtime: Runtime, agent: Agent): number {
-  return runtime.annealing.get(agent.id) ?? 0
+/** 读某会话的退火冷却计数器(缺省 0;agent.id 与 session.id 同值,故统一用会话 id 作 key)。 */
+function turnsSince(runtime: Runtime, sessionId: string): number {
+  return runtime.annealing.get(sessionId) ?? 0
 }
 
 /** 触发一次抽取(后台 fire-and-forget,吞掉错误避免未处理拒绝)。 */
-function scheduleExtraction(ctx: Context, runtime: Runtime, agent: Agent): void {
-  void runExtraction(ctx, runtime, agent).catch((error: unknown) => {
+function scheduleExtraction(ctx: Context, runtime: Runtime, session: Session): void {
+  void runExtraction(ctx, runtime, session).catch((error: unknown) => {
     ctx.logger.warn(`dsh-memory auto-extraction failed: ${error instanceof Error ? error.message : String(error)}`)
   })
 }
 
-/** 注册自动提取的 agent 事件监听(形态 3:事件 + 计数器退火抑制)。 */
+/** 形态守卫:仅当 `autoExtract` 开启且命中指定形态时放行。 */
+function extractEnabled(config: MemoryConfig, mode: ExtractMode): boolean {
+  return config.autoExtract && config.extractMode === mode
+}
+
+/**
+ * 注册自动提取的三种触发形态监听(docs/auto-extraction.md §3)。旁路观测:只监听
+ * 主会话事件 / agent 事件触发抽取,不向主 agent 注入任何「主动记忆」提示词——
+ * 抽取节点的提示词(rules/lessons)只在抽取发生时喂给 v4-flash,不进入主会话。
+ */
 function registerAutoExtraction(ctx: Context, runtime: Runtime): void {
+  // 形态 1 信号词:观测 user/message + assistant/message 正文,命中信号词触发。
+  // 无退火——每次命中即抽(成本靠抽取提示词「无记忆返回空」约束,docs/auto-extraction.md §3)。
+  ctx.on('session/event', (session, event) => {
+    if (!extractEnabled(runtime.config, 'signal')) return
+    let text = ''
+    if (event.type === 'user/message') text = blocksText(event.data.content)
+    else if (event.type === 'assistant/message') text = blocksText(event.data.message.content)
+    else return
+    if (!containsSignalWord(text, parseSignalWords(runtime.config.signalWords))) return
+    scheduleExtraction(ctx, runtime, session)
+  })
+
+  // 形态 2 计数器:观测 turn/end,纯 turn 计数到 extractInterval 触发。
+  ctx.on('session/event', (session, event) => {
+    if (!extractEnabled(runtime.config, 'counter')) return
+    if (event.type !== 'turn/end') return
+    const decision = annealTurnStopping(turnsSince(runtime, session.id), runtime.config.extractInterval)
+    runtime.annealing.set(session.id, decision.turnsSince)
+    if (decision.released) scheduleExtraction(ctx, runtime, session)
+  })
+
+  // 形态 3 事件 + 计数器:agent 事件(语义触发)+ 计数器退火抑制高频。
   // 高频检查点:每 turn 触发一次,退火降到每 N turn 最多一次。
   ctx.on('agent/turn-stopping', ({ agent }) => {
-    if (!shouldAutoExtract(runtime.config)) return
-    const decision = annealTurnStopping(turnsSince(runtime, agent), runtime.config.extractInterval)
+    if (!extractEnabled(runtime.config, 'event-counter')) return
+    const decision = annealTurnStopping(turnsSince(runtime, agent.id), runtime.config.extractInterval)
     runtime.annealing.set(agent.id, decision.turnsSince)
-    if (decision.released) scheduleExtraction(ctx, runtime, agent)
+    if (decision.released) scheduleExtraction(ctx, runtime, agent.session)
   })
 
   // 强语义事件:出错即抽,退火同样防连续 error 高频触发。
   ctx.on('agent/error', ({ agent }) => {
-    if (!shouldAutoExtract(runtime.config)) return
-    const decision = annealError(turnsSince(runtime, agent), runtime.config.extractInterval)
+    if (!extractEnabled(runtime.config, 'event-counter')) return
+    const decision = annealError(turnsSince(runtime, agent.id), runtime.config.extractInterval)
     runtime.annealing.set(agent.id, decision.turnsSince)
-    if (decision.released) scheduleExtraction(ctx, runtime, agent)
+    if (decision.released) scheduleExtraction(ctx, runtime, agent.session)
   })
 
   // 会话开始:新会话直接抽 + 冷却归零。
   ctx.on('agent/session-start', ({ agent }) => {
-    if (!shouldAutoExtract(runtime.config)) return
+    if (!extractEnabled(runtime.config, 'event-counter')) return
     const decision = annealSessionStart()
     runtime.annealing.set(agent.id, decision.turnsSince)
-    if (decision.released) scheduleExtraction(ctx, runtime, agent)
+    if (decision.released) scheduleExtraction(ctx, runtime, agent.session)
   })
 }
 
@@ -771,7 +805,7 @@ export function apply(ctx: Context): void {
 
   registerTools(ctx, runtime)
 
-  // 自动提取(默认关):监听 agent 事件,退火抑制高频(形态 3)。
+  // 自动提取(默认开):三种触发形态(信号词 / 计数器 / 事件+计数器)旁路观测主会话。
   registerAutoExtraction(ctx, runtime)
 
   // settings 是可选服务;存在时接管配置读写并挂载 /lmemory。

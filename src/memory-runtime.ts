@@ -43,9 +43,9 @@ export interface MemoryConfig {
   model: string
   /** 质检(review)模式所用模型 id(设计钉死 v4-pro)。 */
   reviewModel: string
-  /** 是否启用自动提取(默认关,保持主动记忆行为)。 */
+  /** 是否启用自动提取(默认开,旁路观测主会话自动管理记忆)。 */
   autoExtract: boolean
-  /** 触发形态;v1 只接 `event-counter`(形态 3)。 */
+  /** 触发形态(`signal` / `counter` / `event-counter`)。 */
   extractMode: ExtractMode
   /** 相邻两次抽取的最小 turn 间隔(形态 3 作退火冷却期)。 */
   extractInterval: number
@@ -66,7 +66,7 @@ export const DEFAULT_CONFIG: MemoryConfig = {
   provider: 'deepseek-official',
   model: 'deepseek-v4-flash',
   reviewModel: 'deepseek-v4-pro',
-  autoExtract: false,
+  autoExtract: true,
   extractMode: 'event-counter',
   extractInterval: 5,
   signalWords: DEFAULT_SIGNAL_WORDS,

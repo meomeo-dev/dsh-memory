@@ -193,3 +193,24 @@ export function annealError(turnsSince: number, interval: number): AnnealDecisio
 export function annealSessionStart(): AnnealDecision {
   return { released: true, turnsSince: 0 }
 }
+
+/**
+ * 解析信号词配置(docs/auto-extraction.md §3 形态 1)为数组:逗号(半角/全角)/
+ * 顿号分隔,去空白、去空项。
+ * @param raw - 配置原文(如「记住,下次,偏好,always,never」)。
+ * @returns 信号词数组。
+ */
+export function parseSignalWords(raw: string): string[] {
+  return raw.split(/[,，、]/).map(word => word.trim()).filter(word => word.length > 0)
+}
+
+/**
+ * 判断文本是否命中任一信号词(大小写不敏感,子串匹配)。
+ * @param text - 待测文本(如一条 user/message 或 assistant/message 的正文)。
+ * @param words - 信号词数组(来自 {@link parseSignalWords})。
+ * @returns 命中任一信号词时为真。
+ */
+export function containsSignalWord(text: string, words: readonly string[]): boolean {
+  const lower = text.toLowerCase()
+  return words.some(word => lower.includes(word.toLowerCase()))
+}
