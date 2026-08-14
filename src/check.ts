@@ -1,14 +1,14 @@
 /**
  * Markdown 静态检查:渲染产物写盘前的最终守卫。
  *
- * 检查项:表头 7 列、分隔行 7 列、数据行每行列数与表头一致、无未闭合表格、
+ * 检查项:表头 8 列、分隔行 8 列、数据行每行列数与表头一致、无未闭合表格、
  * 单元格内 `|` 已转义。渲染产物不通过则拒绝写盘。纯函数,不 import cordis。
  *
  * @module dsh-memory/check
  */
 
-/** 表格应有的列数(与 {@link MemoryEntry} 的 7 个字段一致)。 */
-const COLUMN_COUNT = 7
+/** 表格应有的列数(首列 id + {@link MemoryEntry} 的 7 个字段)。 */
+const COLUMN_COUNT = 8
 
 /** 管道符在给定下标是否被转义(前导反斜杠数为奇 = 已转义)。 */
 function isEscapedPipe(text: string, index: number): boolean {

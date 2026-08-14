@@ -1,29 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import {
-  appendEntry,
-  discoverEntries,
-  discoverFiles,
-  forget,
-  memoryWriteRoots,
-} from '../src/memory-file.js'
-import { checkMarkdown } from '../src/check.js'
-import type { MemoryEntry } from '../src/schema.js'
-
-function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
-  return {
-    type: 'rules',
-    domain: 'DurablePrefs',
-    scope: '全项目',
-    layer: 'user',
-    entry: '提交信息用 Conventional Commits',
-    entryPoint: '-',
-    references: '-',
-    ...overrides,
-  }
-}
+import { discoverEntries, memoryWriteRoots, visibleMemoryDirs } from '../src/memory-file.js'
 
 let dshHome: string
 let agentsHome: string
@@ -56,60 +35,31 @@ describe('memoryWriteRoots', () => {
   })
 })
 
-describe('appendEntry + discover', () => {
-  it('writes a jsonl row and renders a valid markdown twin', () => {
-    const { jsonlPath, mdPath } = appendEntry(project, entry())
-    const jsonl = readFileSync(jsonlPath, 'utf8')
-    const md = readFileSync(mdPath, 'utf8')
-    expect(jsonl.trim().split('\n')).toHaveLength(1)
-    expect(jsonl).toContain('"entry":"提交信息用 Conventional Commits"')
-    expect(checkMarkdown(md)).toEqual([])
-    expect(md).toContain('提交信息用 Conventional Commits')
-  })
+describe('visibleMemoryDirs', () => {
+  it('lists user-level dirs without a cwd and adds project dirs with one', () => {
+    const withoutProject = visibleMemoryDirs()
+    expect(withoutProject).toHaveLength(3)
+    expect(withoutProject[1]).toBe(join(agentsHome, 'memory'))
+    expect(withoutProject[2]).toBe(join(dshHome, 'memory'))
 
-  it('discovers the written entry via user layer', () => {
-    appendEntry(project, entry())
-    const entries = discoverEntries(project)
-    expect(entries).toHaveLength(1)
-    expect(entries[0]!.entry).toBe('提交信息用 Conventional Commits')
-  })
-
-  it('appends to the same day file rather than overwriting', () => {
-    appendEntry(project, entry())
-    appendEntry(project, entry({ type: 'lessons', entry: '某 API 已改签名', domain: 'PromotedPitfalls' }))
-    // lessons 落到独立的 lessons 文件,故 rules 文件仍只有一条。
-    const rules = discoverEntries(project).filter(e => e.type === 'rules')
-    const lessons = discoverEntries(project).filter(e => e.type === 'lessons')
-    expect(rules).toHaveLength(1)
-    expect(lessons).toHaveLength(1)
+    const withProject = visibleMemoryDirs(project)
+    expect(withProject).toHaveLength(5)
+    expect(withProject[3]).toBe(join(project, '.agents', 'memory'))
+    expect(withProject[4]).toBe(join(project, '.dsh', 'memory'))
   })
 })
 
-describe('forget', () => {
-  it('removes an exact-entry match and re-renders the markdown', () => {
-    appendEntry(project, entry())
-    appendEntry(project, entry({ type: 'lessons', entry: '某坑', domain: 'PromotedPitfalls' }))
-
-    const removed = forget(project, '某坑')
-    expect(removed).toBe(1)
-    expect(discoverEntries(project).map(e => e.entry)).toEqual(['提交信息用 Conventional Commits'])
-
-    // 受影响文件的 md 仍通过静态检查。
-    for (const file of discoverFiles(project)) {
-      expect(checkMarkdown(readFileSync(file.mdPath, 'utf8'))).toEqual([])
-    }
-  })
-
-  it('removes nothing for a non-matching entry', () => {
-    appendEntry(project, entry())
-    expect(forget(project, '不存在')).toBe(0)
-  })
-
-  it('filters by type', () => {
-    appendEntry(project, entry())
-    appendEntry(project, entry({ type: 'lessons', entry: '某坑', domain: 'PromotedPitfalls' }))
-    expect(forget(project, '某坑', 'rules')).toBe(0)
-    expect(forget(project, '某坑', 'lessons')).toBe(1)
+describe('discoverEntries (lenient read of legacy rows)', () => {
+  it('reads a jsonl row without an id (legacy data) without throwing', () => {
+    const dir = join(dshHome, 'memory')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, '2026-08-13.rules.remember.jsonl'),
+      '{"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"两空格缩进","entryPoint":"-","references":"-"}\n',
+      'utf8',
+    )
+    const entries = discoverEntries(project)
+    expect(entries.map(e => e.entry)).toEqual(['两空格缩进'])
   })
 })
 

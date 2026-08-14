@@ -1,10 +1,19 @@
 /**
  * `/lmemory` 命令的参数解析(纯函数)。
  *
- * 子命令:status / team start|stop|restart / query <text> / config get|set。
+ * 子命令:status / team start|stop|restart / query <text> / config get|set /
+ * review [layer|domain]。
  * 解析只做词法切分,不校验配置键语义(交给 index.ts 的 handler)。
  * @module dsh-memory/command
  */
+
+import { DOMAINS, LAYERS } from './schema.js'
+import type { DomainId, LayerId } from './schema.js'
+
+/** `/lmemory review` 的可选限定(按落点层或知识领域缩小质检范围)。 */
+export type ReviewFilter =
+  | { readonly kind: 'layer'; readonly value: LayerId }
+  | { readonly kind: 'domain'; readonly value: DomainId }
 
 /** `/lmemory` 命令的解析结果。 */
 export type LmemoryCommand =
@@ -14,9 +23,10 @@ export type LmemoryCommand =
   | { readonly kind: 'query'; readonly text: string }
   | { readonly kind: 'config-get'; readonly key?: string }
   | { readonly kind: 'config-set'; readonly key: string; readonly value: string }
+  | { readonly kind: 'review'; readonly filter?: ReviewFilter }
 
 /** 命令用法回显文案。 */
-export const USAGE = 'Usage: /lmemory status | team start|stop|restart | query <text> | config get|set <key> [value]'
+export const USAGE = 'Usage: /lmemory status | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain]'
 
 /**
  * 解析 `/lmemory` 命令参数。
@@ -43,6 +53,18 @@ export function parseLmemoryCommand(rawInput: string): LmemoryCommand {
     }
     if (sub === 'get') return { kind: 'config-get', key: parts[2] }
     if (sub === undefined) return { kind: 'config-get' }
+    return { kind: 'help' }
+  }
+  if (head === 'review') {
+    const token = parts[1]
+    if (token === undefined) return { kind: 'review' }
+    const layer = token.toLowerCase()
+    if ((LAYERS as readonly string[]).includes(layer)) {
+      return { kind: 'review', filter: { kind: 'layer', value: layer as LayerId } }
+    }
+    if ((DOMAINS as readonly string[]).includes(token)) {
+      return { kind: 'review', filter: { kind: 'domain', value: token as DomainId } }
+    }
     return { kind: 'help' }
   }
   return { kind: 'help' }

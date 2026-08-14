@@ -35,4 +35,21 @@ describe('parseLmemoryCommand', () => {
   it('falls back to help for unknown heads', () => {
     expect(parseLmemoryCommand('wat')).toEqual({ kind: 'help' })
   })
+
+  it('parses review with no filter', () => {
+    expect(parseLmemoryCommand('review')).toEqual({ kind: 'review' })
+  })
+
+  it('parses review with a layer filter', () => {
+    expect(parseLmemoryCommand('review project')).toEqual({ kind: 'review', filter: { kind: 'layer', value: 'project' } })
+    expect(parseLmemoryCommand('review USER')).toEqual({ kind: 'review', filter: { kind: 'layer', value: 'user' } })
+  })
+
+  it('parses review with a domain filter', () => {
+    expect(parseLmemoryCommand('review DurablePrefs')).toEqual({ kind: 'review', filter: { kind: 'domain', value: 'DurablePrefs' } })
+  })
+
+  it('falls back to help for an unrecognized review filter', () => {
+    expect(parseLmemoryCommand('review bogus')).toEqual({ kind: 'help' })
+  })
 })

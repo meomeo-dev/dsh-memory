@@ -4,6 +4,7 @@ import type { MemoryEntry } from '../src/schema.js'
 
 function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
+    id: 'm-0000000000',
     type: 'rules',
     domain: 'DurablePrefs',
     scope: '全项目',
@@ -30,10 +31,10 @@ describe('renderMd', () => {
     const md = renderMd([entry()])
     const lines = md.trimEnd().split('\n')
     expect(lines).toHaveLength(3)
-    expect(lines[0]).toContain('| 类型 |')
-    expect(lines[0].split(' | ')).toHaveLength(7)
-    expect(lines[1]).toBe('|---|---|---|---|---|---|---|')
-    expect(lines[2]).toContain('| rules | DurablePrefs |')
+    expect(lines[0]).toContain('| id |')
+    expect(lines[0].split(' | ')).toHaveLength(8)
+    expect(lines[1]).toBe('|---|---|---|---|---|---|---|---|')
+    expect(lines[2]).toContain('| m-0000000000 | rules | DurablePrefs |')
   })
 
   it('escapes pipes inside the entry cell', () => {

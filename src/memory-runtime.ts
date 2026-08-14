@@ -12,6 +12,21 @@ import { discoverFiles, findProjectRoot } from './memory-file.js'
 import { warmUp } from './team.js'
 import type { MemorySource, RecallTeam } from './team.js'
 
+/** 自动提取触发形态枚举(docs/auto-extraction.md §3)。 */
+export const EXTRACT_MODES = ['signal', 'counter', 'event-counter'] as const
+
+/** 自动提取触发形态。 */
+export type ExtractMode = (typeof EXTRACT_MODES)[number]
+
+/** rules 抽取器默认提示词(docs/auto-extraction.md §5.3)。 */
+const DEFAULT_EXTRACT_RULES_PROMPT = '你是「用户偏好(rules)」抽取器。给定一段对话,找出用户明确表达或隐含的长期偏好、习惯、格式、技术栈限制、共识、约束。只输出值得长期记住的条目,一行一条,格式为「domain|scope|entry」,domain 从已知领域枚举中选最贴切的一个(如 DurablePrefs、CodeFacts、Style),scope 填这条记忆影响的具体子系统 / 模块(自由文本,如「全项目」「Web UI」);没有值得记的输出空。禁止记录:操作流水账、思考过程、具体代码实现、密钥或凭据、易变的进度/待办。'
+
+/** lessons 抽取器默认提示词(docs/auto-extraction.md §5.3)。 */
+const DEFAULT_EXTRACT_LESSONS_PROMPT = '你是「经验教训(lessons)」抽取器。给定一段对话,找出踩过的坑、环境限制、API 变更、bug 根因结论。只输出值得长期记住的条目,一行一条,格式为「domain|scope|entry」,domain 从已知领域枚举中选最贴切的一个(如 PastFixes、PromotedPitfalls、CodeFacts),scope 填这条记忆影响的具体子系统 / 模块(自由文本,如「样本库」「检测评分」),单条不超过 300 字;没有值得记的输出空。禁止记录:操作流水账、思考过程、具体代码实现、密钥或凭据。'
+
+/** 形态 1(signal)默认信号词集,逗号分隔(docs/auto-extraction.md §3)。 */
+const DEFAULT_SIGNAL_WORDS = '记住,下次,以后,偏好,习惯,约定,规则,常,总是,从不,remember,preference,always,never,habit,rule'
+
 /** 用户可写配置切片(与 `ctx.settings` 的命名空间 schema 对应)。 */
 export interface MemoryConfig {
   /** 每节点容量上限(单位 Kb)。 */
@@ -26,9 +41,23 @@ export interface MemoryConfig {
   provider: string
   /** 召回模型 id(设计钉死 v4-flash)。 */
   model: string
+  /** 质检(review)模式所用模型 id(设计钉死 v4-pro)。 */
+  reviewModel: string
+  /** 是否启用自动提取(默认关,保持主动记忆行为)。 */
+  autoExtract: boolean
+  /** 触发形态;v1 只接 `event-counter`(形态 3)。 */
+  extractMode: ExtractMode
+  /** 相邻两次抽取的最小 turn 间隔(形态 3 作退火冷却期)。 */
+  extractInterval: number
+  /** 形态 1(signal)信号词集,逗号分隔。 */
+  signalWords: string
+  /** rules 抽取器提示词模板。 */
+  extractRulesPrompt: string
+  /** lessons 抽取器提示词模板。 */
+  extractLessonsPrompt: string
 }
 
-/** 召回默认配置(设计文档 §9 的起点)。 */
+/** 召回默认配置(设计文档 §9 的起点,含自动提取配置 auto-extraction.md §7)。 */
 export const DEFAULT_CONFIG: MemoryConfig = {
   maxNodeKb: 600,
   recallTopK: 10,
@@ -36,10 +65,17 @@ export const DEFAULT_CONFIG: MemoryConfig = {
   warmupOnStart: true,
   provider: 'deepseek-official',
   model: 'deepseek-v4-flash',
+  reviewModel: 'deepseek-v4-pro',
+  autoExtract: false,
+  extractMode: 'event-counter',
+  extractInterval: 5,
+  signalWords: DEFAULT_SIGNAL_WORDS,
+  extractRulesPrompt: DEFAULT_EXTRACT_RULES_PROMPT,
+  extractLessonsPrompt: DEFAULT_EXTRACT_LESSONS_PROMPT,
 }
 
 /** 可经 `/lmemory config get|set` 读写的配置键。 */
-export const CONFIG_KEYS = ['maxNodeKb', 'recallTopK', 'rerankPrompt', 'warmupOnStart', 'provider', 'model'] as const
+export const CONFIG_KEYS = ['maxNodeKb', 'recallTopK', 'rerankPrompt', 'warmupOnStart', 'provider', 'model', 'reviewModel', 'autoExtract', 'extractMode', 'extractInterval', 'signalWords', 'extractRulesPrompt', 'extractLessonsPrompt'] as const
 
 /** 一个配置键。 */
 export type ConfigKey = (typeof CONFIG_KEYS)[number]

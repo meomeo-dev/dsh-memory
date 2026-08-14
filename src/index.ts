@@ -21,26 +21,48 @@ import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-llm'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 
-import { DOMAINS, MAX_LESSON_CHARS, validateEntry } from './schema.js'
-import type { MemoryEntry, MemoryType } from './schema.js'
+import { DOMAINS } from './schema.js'
+import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
 import { renderSummary } from './render.js'
-import { appendEntry, discoverEntries, forget } from './memory-file.js'
+import { discoverEntries } from './memory-file.js'
+import { append, find, remove, removeByEntry, update } from './store.js'
 import { recall as recallTeam } from './team.js'
 import type { NodeRecallFn, RerankFn } from './team.js'
+import {
+  parseFindings,
+  renderReviewReport,
+  reviewEntryLine,
+  reviewTeam,
+  runReview,
+} from './review.js'
+import type { CrossNodeReviewFn, NodeReviewFn, ReviewFinding } from './review.js'
+import { assertDeletable, requireMemoryId } from './tool-guard.js'
 import {
   CONFIG_KEYS,
   createRuntimeState,
   DEFAULT_CONFIG,
+  EXTRACT_MODES,
   ensureTeam,
   restartTeam,
   stopTeams,
   teamStatus,
 } from './memory-runtime.js'
 import type { MemoryConfig, RuntimeState, TeamStatus } from './memory-runtime.js'
+import {
+  annealError,
+  annealSessionStart,
+  annealTurnStopping,
+  buildTranscript,
+  deriveLayer,
+  extractBoth,
+  filterNovel,
+} from './extract.js'
+import type { ExtractFn, TranscriptMessage } from './extract.js'
 import { USAGE, parseLmemoryCommand } from './command.js'
 
 /** Stable Cordis plugin name. */
@@ -60,15 +82,24 @@ const SCHEMA: z<MemoryConfig> = z.object({
   warmupOnStart: z.boolean().default(DEFAULT_CONFIG.warmupOnStart),
   provider: z.string().min(1).default(DEFAULT_CONFIG.provider),
   model: z.string().min(1).default(DEFAULT_CONFIG.model),
+  reviewModel: z.string().min(1).default(DEFAULT_CONFIG.reviewModel),
+  autoExtract: z.boolean().default(DEFAULT_CONFIG.autoExtract),
+  extractMode: z.union([...EXTRACT_MODES]).default(DEFAULT_CONFIG.extractMode),
+  extractInterval: z.number().step(1).min(1).default(DEFAULT_CONFIG.extractInterval),
+  signalWords: z.string().default(DEFAULT_CONFIG.signalWords),
+  extractRulesPrompt: z.string().min(1).default(DEFAULT_CONFIG.extractRulesPrompt),
+  extractLessonsPrompt: z.string().min(1).default(DEFAULT_CONFIG.extractLessonsPrompt),
 })
 
 /** 召回节点 system prompt(固定,非配置项)。 */
 const NODE_RECALL_SYSTEM = '你是长期记忆召回节点。给定一组记忆条目(每条一行,格式 `[类型|领域] 条目文本`)与一个查询,仅返回与查询相关的条目的「条目文本」部分,一行一条,照抄原文,不返回任何解释。无相关条目时返回空。'
 
-/** 运行时可变状态:已预热 team + 当前配置。 */
+/** 运行时可变状态:已预热 team + 当前配置 + 退火冷却计数器。 */
 interface Runtime {
   readonly state: RuntimeState
   config: MemoryConfig
+  /** 会话 id → 距上次抽取的 turn 数(形态 3 退火冷却,按会话独立)。 */
+  readonly annealing: Map<string, number>
 }
 
 /** remember 工具的规范化输出。 */
@@ -92,6 +123,37 @@ interface ForgetValue {
   entry: string
 }
 
+/** memory-find 工具命中的一条记忆的规范化输出。 */
+interface FoundMemoryValue {
+  id: string
+  file: string
+  type: string
+  domain: string
+  scope: string
+  layer: string
+  entry: string
+  entryPoint: string
+  references: string
+}
+
+/** memory-find 工具的规范化输出。 */
+interface FindValue {
+  entries: FoundMemoryValue[]
+}
+
+/** memory-update 工具的规范化输出。 */
+interface UpdateValue {
+  id: string
+  entry: string
+  file: string
+}
+
+/** memory-delete 工具的规范化输出。 */
+interface DeleteValue {
+  removed: boolean
+  id: string
+}
+
 /** 把模型输出文本按行拆成条目(轻量去前缀)。 */
 function parseLines(text: string): string[] {
   return text.split('\n')
@@ -102,8 +164,21 @@ function parseLines(text: string): string[] {
     .filter(line => line.length > 0)
 }
 
-/** 用 v4-flash 发一次轻量召回调用,返回聚合文本。 */
-async function callFlash(ctx: Context, config: MemoryConfig, system: string, prompt: string): Promise<string> {
+/**
+ * 发一次轻量模型调用(召回用 v4-flash、质检用 v4-pro),返回聚合文本。
+ * @param ctx - 插件上下文。
+ * @param config - 当前配置(取 provider)。
+ * @param system - system prompt 文本。
+ * @param prompt - 用户消息文本。
+ * @param model - 覆盖模型 id;缺省用 `config.model`。
+ */
+async function callFlash(
+  ctx: Context,
+  config: MemoryConfig,
+  system: string,
+  prompt: string,
+  model = config.model,
+): Promise<string> {
   const message = createUserMessage({
     source: { kind: 'plugin', plugin: 'dsh-memory' },
     content: [{ type: 'text', text: prompt }],
@@ -111,7 +186,7 @@ async function callFlash(ctx: Context, config: MemoryConfig, system: string, pro
   let text = ''
   for await (const chunk of ctx.llm.stream({
     provider: config.provider,
-    model: config.model,
+    model,
     system,
     messages: [message],
   })) {
@@ -141,6 +216,139 @@ async function doRecall(ctx: Context, runtime: Runtime, cwd: string | undefined,
     return ordered.length > 0 ? ordered : candidates
   }
   return recallTeam(team, query, nodeFn, rerankFn, runtime.config.recallTopK)
+}
+
+/** 质检节点 system prompt(固定,非配置项;只输出 JSON 数组)。 */
+const NODE_REVIEW_SYSTEM = '你是长期记忆质检员。给定一组记忆条目(每条一行,格式 `[id|type|domain|scope] 条目文本`),批判性审查,找出其中的缺陷,只输出一个 JSON 数组,不要输出任何解释。四类缺陷:contradiction(两条记忆互相矛盾)、duplicate(同义记忆重复)、outdated(被新事实推翻的过时结论)、divergence(与当前项目状态背离)。每个元素形如 {"id":"目标记忆 id","problem":"contradiction|duplicate|outdated|divergence","related":["关联记忆 id"],"note":"一句话描述","suggest":"update|delete|merge","suggestedEntry":"建议新条目文本(可选)"}。contradiction/duplicate 需填 related;outdated/divergence 通常单条(related 为空数组)。id/related 必须照抄给定条目的 id,不得编造。无缺陷时输出 []。'
+
+/** 质检跨节点 system prompt(只判矛盾/重复,只输出 JSON 数组)。 */
+const CROSS_NODE_REVIEW_SYSTEM = '你是长期记忆质检员。给定全部记忆条目(每条一行,格式 `[id|type|domain|scope] 条目文本`),这些条目可能原本分在不同分组,现在合并到一起。找出跨条目的矛盾(contradiction)与重复(duplicate),只输出一个 JSON 数组,不要输出任何解释。每个元素形如 {"id":"目标记忆 id","problem":"contradiction|duplicate","related":["关联记忆 id"],"note":"一句话描述","suggest":"update|delete|merge","suggestedEntry":"可选"}。id/related 必须照抄给定条目的 id,不得编造。无缺陷时输出 []。'
+
+/**
+ * 执行一次质检:读全部可见记忆 → 带 id 分区 → v4-pro fan-out + 跨节点聚合。
+ * @param ctx - 插件上下文。
+ * @param runtime - 运行时状态(team + 配置)。
+ * @param cwd - 当前工作目录。
+ * @param filter - 可选限定(按 layer / domain 缩小质检范围)。
+ * @returns 聚合去重后的缺陷发现。
+ */
+async function doReview(
+  ctx: Context,
+  runtime: Runtime,
+  cwd: string | undefined,
+  filter?: { kind: 'layer'; value: LayerId } | { kind: 'domain'; value: DomainId },
+): Promise<ReviewFinding[]> {
+  let entries = discoverEntries(cwd)
+  if (filter?.kind === 'layer') entries = entries.filter(entry => entry.layer === filter.value)
+  else if (filter?.kind === 'domain') entries = entries.filter(entry => entry.domain === filter.value)
+  if (entries.length === 0) return []
+
+  const team = reviewTeam(entries, runtime.config.maxNodeKb)
+  const knownIds = new Set(entries.map(entry => entry.id))
+
+  const nodeReviewFn: NodeReviewFn = async (node) => {
+    const response = await callFlash(ctx, runtime.config, NODE_REVIEW_SYSTEM, `记忆条目:\n${node.text}`, runtime.config.reviewModel)
+    return parseFindings(response, knownIds)
+  }
+  const crossNodeReviewFn: CrossNodeReviewFn = async (allEntries) => {
+    const text = allEntries.map(reviewEntryLine).join('\n')
+    const response = await callFlash(ctx, runtime.config, CROSS_NODE_REVIEW_SYSTEM, `记忆条目:\n${text}`, runtime.config.reviewModel)
+    return parseFindings(response, knownIds)
+  }
+  return runReview(team, entries, nodeReviewFn, crossNodeReviewFn)
+}
+
+/** 从一条消息的 content blocks 提取纯文本(只取 text 块,跳过 reasoning/tool/图片)。 */
+function blockText(block: ContentBlock): string {
+  switch (block.type) {
+    case 'text':
+      return block.text
+    // reasoning / image / tool-call / tool-result 不含面向会话的正文;抽取器只看对话文本。
+    default:
+      return ''
+  }
+}
+
+/** 把 `deriveMessages()` 的结果投影成抽取器输入(role + 文本,过滤空文本消息)。 */
+function toTranscript(messages: readonly Message[]): TranscriptMessage[] {
+  const result: TranscriptMessage[] = []
+  for (const message of messages) {
+    const text = message.content.map(blockText).filter(chunk => chunk.length > 0).join(' ')
+    if (text.length === 0) continue
+    result.push({ role: message.role, text })
+  }
+  return result
+}
+
+/**
+ * 执行一次自动提取:主会话上下文 fan-out 两个抽取节点 → 写盘(走 store)。
+ *
+ * 抽取器不调 remember 工具,直接调共享存储层;layer 由会话推导,scope/domain/entry
+ * 由抽取器输出(docs/auto-extraction.md §5.5/§5.6)。lessons 先按 entry 与已有记忆
+ * 去重再追加,rules 重复由 store.append 的 duplicate 拒绝兜底。
+ * @param ctx - 插件上下文。
+ * @param runtime - 运行时状态(配置)。
+ * @param agent - 触发抽取的 agent(取 session 上下文与 cwd)。
+ */
+async function runExtraction(ctx: Context, runtime: Runtime, agent: Agent): Promise<void> {
+  const cwd = agent.session.header.cwd
+  if (cwd === undefined) return
+  const transcript = buildTranscript(toTranscript(agent.session.deriveMessages()))
+  const rulesFn: ExtractFn = text => callFlash(ctx, runtime.config, runtime.config.extractRulesPrompt, text)
+  const lessonsFn: ExtractFn = text => callFlash(ctx, runtime.config, runtime.config.extractLessonsPrompt, text)
+  const result = await extractBoth(transcript, rulesFn, lessonsFn)
+  const layer = deriveLayer(cwd)
+  const existingLessons = new Set(find(cwd, { type: 'lessons' }).map(found => found.entry.entry))
+  for (const candidate of result.rules) {
+    append(cwd, { type: 'rules', domain: candidate.domain, scope: candidate.scope, layer, entry: candidate.entry })
+  }
+  for (const candidate of filterNovel(result.lessons, existingLessons)) {
+    append(cwd, { type: 'lessons', domain: candidate.domain, scope: candidate.scope, layer, entry: candidate.entry })
+  }
+}
+
+/** 触发抽取的公共守卫:v1 只在 `autoExtract` 开启且为 `event-counter` 形态时放行。 */
+function shouldAutoExtract(config: MemoryConfig): boolean {
+  return config.autoExtract && config.extractMode === 'event-counter'
+}
+
+/** 读某会话的退火冷却计数器(缺省 0)。 */
+function turnsSince(runtime: Runtime, agent: Agent): number {
+  return runtime.annealing.get(agent.id) ?? 0
+}
+
+/** 触发一次抽取(后台 fire-and-forget,吞掉错误避免未处理拒绝)。 */
+function scheduleExtraction(ctx: Context, runtime: Runtime, agent: Agent): void {
+  void runExtraction(ctx, runtime, agent).catch((error: unknown) => {
+    ctx.logger.warn(`dsh-memory auto-extraction failed: ${error instanceof Error ? error.message : String(error)}`)
+  })
+}
+
+/** 注册自动提取的 agent 事件监听(形态 3:事件 + 计数器退火抑制)。 */
+function registerAutoExtraction(ctx: Context, runtime: Runtime): void {
+  // 高频检查点:每 turn 触发一次,退火降到每 N turn 最多一次。
+  ctx.on('agent/turn-stopping', ({ agent }) => {
+    if (!shouldAutoExtract(runtime.config)) return
+    const decision = annealTurnStopping(turnsSince(runtime, agent), runtime.config.extractInterval)
+    runtime.annealing.set(agent.id, decision.turnsSince)
+    if (decision.released) scheduleExtraction(ctx, runtime, agent)
+  })
+
+  // 强语义事件:出错即抽,退火同样防连续 error 高频触发。
+  ctx.on('agent/error', ({ agent }) => {
+    if (!shouldAutoExtract(runtime.config)) return
+    const decision = annealError(turnsSince(runtime, agent), runtime.config.extractInterval)
+    runtime.annealing.set(agent.id, decision.turnsSince)
+    if (decision.released) scheduleExtraction(ctx, runtime, agent)
+  })
+
+  // 会话开始:新会话直接抽 + 冷却归零。
+  ctx.on('agent/session-start', ({ agent }) => {
+    if (!shouldAutoExtract(runtime.config)) return
+    const decision = annealSessionStart()
+    runtime.annealing.set(agent.id, decision.turnsSince)
+    if (decision.released) scheduleExtraction(ctx, runtime, agent)
+  })
 }
 
 /** 应用新配置;容量变化时释放已预热 team 以便下次重分区。 */
@@ -177,15 +385,19 @@ function renderConfig(config: MemoryConfig, key?: string): string {
 
 /** 把配置命令里的原始字符串强转成对应 JS 值。 */
 function coerceConfigValue(key: string, raw: string): unknown {
-  if (key === 'maxNodeKb' || key === 'recallTopK') {
+  if (key === 'maxNodeKb' || key === 'recallTopK' || key === 'extractInterval') {
     const value = Number(raw)
     if (!Number.isInteger(value) || value < 1) throw new Error(`${key} must be a positive integer`)
     return value
   }
-  if (key === 'warmupOnStart') {
+  if (key === 'warmupOnStart' || key === 'autoExtract') {
     if (raw === 'true' || raw === '1') return true
     if (raw === 'false' || raw === '0') return false
-    throw new Error('warmupOnStart must be true or false')
+    throw new Error(`${key} must be true or false`)
+  }
+  if (key === 'extractMode') {
+    if ((EXTRACT_MODES as readonly string[]).includes(raw)) return raw
+    throw new Error(`extractMode must be one of ${EXTRACT_MODES.join(', ')}`)
   }
   return raw
 }
@@ -232,6 +444,15 @@ async function handleCommand(
         applyConfig(runtime, scope.get())
         return { kind: 'success', text: renderConfig(runtime.config, command.key) }
       }
+      case 'review': {
+        const findings = await doReview(ctx, runtime, cwd, command.filter)
+        const report = renderReviewReport(findings)
+        invocation.agent.followup(createUserMessage({
+          source: { kind: 'plugin', plugin: 'dsh-memory', form: 'notice', summary: `记忆质检:发现 ${findings.length} 处缺陷` },
+          content: [{ type: 'text', text: report }],
+        }))
+        return { kind: 'success', text: `review 完成,发现 ${findings.length} 处,报告已注入会话` }
+      }
       /* v8 ignore next 2 -- closed union backstop */
       default:
         return { kind: 'error', text: USAGE }
@@ -249,6 +470,15 @@ const RECALL_DESCRIPTION = 'Recall relevant long-term memory entries for a query
 
 /** forget 工具:精确匹配删除;rules 删除需 confirm:true。 */
 const FORGET_DESCRIPTION = 'Delete a long-term memory entry by exact entry text. Deleting a "rules" entry requires confirm: true because rules are append-only.'
+
+/** memory-find 工具:按 id 精确查一条,或按类型/领域/范围/落点层过滤列多条。 */
+const FIND_DESCRIPTION = 'Look up long-term memory entries. Pass an exact id to retrieve one entry, or filter by type, domain, scope, or storage layer to list many. Returns the full entry with its id and containing file.'
+
+/** memory-update 工具:按 id 改写可改字段;id/type/layer 不可改。 */
+const UPDATE_DESCRIPTION = 'Update one long-term memory entry by its exact id. Only the entry text, domain, scope, entryPoint, and references are mutable; the id, type, and layer cannot change.'
+
+/** memory-delete 工具:按 id 精确删除;rules 删除需 confirm:true。 */
+const DELETE_DESCRIPTION = 'Delete one long-term memory entry by its exact id. Deleting a "rules" entry requires confirm: true because rules are append-only.'
 
 /**
  * 注册 remember / recall / forget 三个模型工具。
@@ -290,31 +520,25 @@ function registerTools(ctx: Context, runtime: Runtime): void {
       },
     },
     async execute(args, exec): Promise<RememberValue> {
-      if (args.entry.trim().length === 0) throw new Error('remember: entry must be non-empty')
-      const type = args.type as MemoryType
-      if (type === 'lessons' && args.entry.length > MAX_LESSON_CHARS) {
-        throw new Error(`remember: lessons entry must be at most ${MAX_LESSON_CHARS} characters`)
-      }
-      const candidate: Record<string, unknown> = {
-        type,
-        domain: args.domain,
+      const candidate: MemoryEntryInput = {
+        type: args.type as MemoryType,
+        domain: args.domain as DomainId,
         scope: args.scope,
-        layer: args.layer,
+        layer: args.layer as LayerId,
         entry: args.entry,
+        ...(args.entryPoint !== undefined ? { entryPoint: args.entryPoint } : {}),
+        ...(args.references !== undefined ? { references: args.references } : {}),
       }
-      if (args.entryPoint !== undefined) candidate.entryPoint = args.entryPoint
-      if (args.references !== undefined) candidate.references = args.references
-      const entry: MemoryEntry = validateEntry(candidate)
-
       const cwd = exec.agent?.session.header.cwd ?? process.cwd()
-      if (type === 'rules') {
-        const duplicate = discoverEntries(cwd).some(existing => existing.type === 'rules' && existing.entry === entry.entry)
-        if (duplicate) {
-          return { remembered: true, duplicate: true, type, entry: entry.entry, jsonlPath: '-', mdPath: '-' }
-        }
+      const result = append(cwd, candidate)
+      return {
+        remembered: true,
+        duplicate: result.duplicate,
+        type: result.entry.type,
+        entry: result.entry.entry,
+        jsonlPath: result.jsonlPath ?? '-',
+        mdPath: result.mdPath ?? '-',
       }
-      const { jsonlPath, mdPath } = appendEntry(cwd, entry)
-      return { remembered: true, duplicate: false, type, entry: entry.entry, jsonlPath, mdPath }
     },
   }))
 
@@ -369,13 +593,155 @@ function registerTools(ctx: Context, runtime: Runtime): void {
     async execute(args, exec): Promise<ForgetValue> {
       const cwd = exec.agent?.session.header.cwd ?? process.cwd()
       const type = args.type as MemoryType | undefined
-      const matches = discoverEntries(cwd).filter(entry =>
-        entry.entry === args.entry && (type === undefined || entry.type === type))
-      if (matches.some(entry => entry.type === 'rules') && args.confirm !== true) {
+      const matches = find(cwd, type === undefined ? {} : { type })
+        .filter(found => found.entry.entry === args.entry)
+      if (matches.some(found => found.entry.type === 'rules') && args.confirm !== true) {
         throw new Error('forget: this removes a "rules" entry; call again with confirm: true to proceed.')
       }
-      const removed = forget(cwd, args.entry, type)
+      const removed = removeByEntry(cwd, args.entry, type)
       return { removed, entry: args.entry }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'memory-find',
+    description: FIND_DESCRIPTION,
+    parameters: {
+      id: { type: 'string', description: 'Exact memory id to retrieve (e.g. "m-3k9f2x8q1a").' },
+      type: { type: 'string', enum: ['rules', 'lessons'], description: 'Filter by memory type.' },
+      domain: { type: 'string', enum: [...DOMAINS], description: 'Filter by knowledge domain.' },
+      scope: { type: 'string', description: 'Filter by exact impacted scope.' },
+      layer: { type: 'string', enum: ['global', 'user', 'project'], description: 'Filter by storage layer.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          entries: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string', required: true },
+                file: { type: 'string', required: true },
+                type: { type: 'string', required: true },
+                domain: { type: 'string', required: true },
+                scope: { type: 'string', required: true },
+                layer: { type: 'string', required: true },
+                entry: { type: 'string', required: true },
+                entryPoint: { type: 'string', required: true },
+                references: { type: 'string', required: true },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => {
+        const v = value as FindValue
+        if (v.entries.length === 0) return [{ type: 'text', text: 'No matching memory entries.' }]
+        const lines = v.entries.map((found, index) =>
+          `${index + 1}. [${found.id}] (${found.type}/${found.domain}, ${found.layer}) ${found.entry} — ${found.file}`)
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+    },
+    async execute(args, exec): Promise<FindValue> {
+      const cwd = exec.agent?.session.header.cwd
+      const id = args.id !== undefined ? requireMemoryId(args.id) : undefined
+      const entries = find(cwd, {
+        ...(id !== undefined ? { id } : {}),
+        ...(args.type !== undefined ? { type: args.type as MemoryType } : {}),
+        ...(args.domain !== undefined ? { domain: args.domain as DomainId } : {}),
+        ...(args.scope !== undefined ? { scope: args.scope } : {}),
+        ...(args.layer !== undefined ? { layer: args.layer as LayerId } : {}),
+      })
+      return {
+        entries: entries.map(found => ({
+          id: found.entry.id,
+          file: found.file,
+          type: found.entry.type,
+          domain: found.entry.domain,
+          scope: found.entry.scope,
+          layer: found.entry.layer,
+          entry: found.entry.entry,
+          entryPoint: found.entry.entryPoint,
+          references: found.entry.references,
+        })),
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'memory-update',
+    description: UPDATE_DESCRIPTION,
+    parameters: {
+      id: { type: 'string', required: true, description: 'Exact memory id to update.' },
+      entry: { type: 'string', description: 'New one-sentence entry text.' },
+      domain: { type: 'string', enum: [...DOMAINS], description: 'New knowledge domain.' },
+      scope: { type: 'string', description: 'New impacted scope.' },
+      entryPoint: { type: 'string', description: 'New associated entry-point file path.' },
+      references: { type: 'string', description: 'New associated reference file path.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', required: true },
+          entry: { type: 'string', required: true },
+          file: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => {
+        const v = value as UpdateValue
+        return [{ type: 'text', text: `Updated ${v.id}: ${v.entry} (${v.file})` }]
+      },
+    },
+    async execute(args, exec): Promise<UpdateValue> {
+      const id = requireMemoryId(args.id)
+      const cwd = exec.agent?.session.header.cwd ?? process.cwd()
+      const updated = update(cwd, id, {
+        ...(args.entry !== undefined ? { entry: args.entry } : {}),
+        ...(args.domain !== undefined ? { domain: args.domain as DomainId } : {}),
+        ...(args.scope !== undefined ? { scope: args.scope } : {}),
+        ...(args.entryPoint !== undefined ? { entryPoint: args.entryPoint } : {}),
+        ...(args.references !== undefined ? { references: args.references } : {}),
+      })
+      return { id: updated.entry.id, entry: updated.entry.entry, file: updated.file }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'memory-delete',
+    description: DELETE_DESCRIPTION,
+    parameters: {
+      id: { type: 'string', required: true, description: 'Exact memory id to delete.' },
+      confirm: { type: 'boolean', description: 'Required (true) when deleting a rules entry.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          removed: { type: 'boolean', required: true },
+          id: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => {
+        const v = value as DeleteValue
+        return [{ type: 'text', text: v.removed ? `Deleted ${v.id}` : `No memory entry with id ${v.id}` }]
+      },
+    },
+    async execute(args, exec): Promise<DeleteValue> {
+      const id = requireMemoryId(args.id)
+      const cwd = exec.agent?.session.header.cwd ?? process.cwd()
+      const found = find(cwd, { id })
+      if (found.length === 0) return { removed: false, id }
+      assertDeletable(found[0]!.entry, args.confirm)
+      const result = remove(cwd, id)
+      return { removed: result.removed, id }
     },
   }))
 }
@@ -385,7 +751,7 @@ function registerTools(ctx: Context, runtime: Runtime): void {
  * @param ctx - Cordis 上下文。
  */
 export function apply(ctx: Context): void {
-  const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG } }
+  const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG }, annealing: new Map() }
 
   // order 10:persona(0)之后、工具指导(100–199)之前,注入已知记忆摘要。
   ctx.systemPrompt.section({
@@ -396,6 +762,9 @@ export function apply(ctx: Context): void {
 
   registerTools(ctx, runtime)
 
+  // 自动提取(默认关):监听 agent 事件,退火抑制高频(形态 3)。
+  registerAutoExtraction(ctx, runtime)
+
   // settings 是可选服务;存在时接管配置读写并挂载 /lmemory。
   ctx.inject(['settings'], (sctx) => {
     const scope = sctx.settings.register(NAMESPACE, SCHEMA, { base: DEFAULT_CONFIG })
@@ -405,8 +774,8 @@ export function apply(ctx: Context): void {
 
     ctx.commands.register({
       name: 'lmemory',
-      description: 'manage long-term memory (status / team / query / config)',
-      input: { hint: 'status | team start|stop|restart | query <text> | config get|set <key> [value]' },
+      description: 'manage long-term memory (status / team / query / config / review)',
+      input: { hint: 'status | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain]' },
       handler: invocation => handleCommand(ctx, runtime, scope, invocation),
     })
   })

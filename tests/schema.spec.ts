@@ -3,7 +3,10 @@ import {
   DOMAINS,
   FILE_NAME_RE,
   MEMORY_ENTRY_SCHEMA,
+  MEMORY_ID_RE,
   MEMORY_TYPES,
+  generateMemoryId,
+  isMemoryId,
   parseEntry,
   TABLE_HEADER,
   TABLE_SEPARATOR,
@@ -34,9 +37,28 @@ describe('contract constants', () => {
     expect(new Set(DOMAINS).size).toBe(21)
   })
 
-  it('exposes a 7-column header and separator', () => {
-    expect(TABLE_HEADER).toHaveLength(7)
-    expect(TABLE_SEPARATOR).toBe('|---|---|---|---|---|---|---|')
+  it('exposes an 8-column header and separator', () => {
+    expect(TABLE_HEADER).toHaveLength(8)
+    expect(TABLE_SEPARATOR).toBe('|---|---|---|---|---|---|---|---|')
+  })
+})
+
+describe('MemoryId', () => {
+  it('generates a well-formed id (m- + 10 base36)', () => {
+    expect(isMemoryId(generateMemoryId())).toBe(true)
+    expect(MEMORY_ID_RE.test(generateMemoryId())).toBe(true)
+  })
+
+  it('generates globally unique ids', () => {
+    const ids = new Set(Array.from({ length: 1000 }, () => generateMemoryId()))
+    expect(ids.size).toBe(1000)
+  })
+
+  it('rejects malformed ids', () => {
+    expect(isMemoryId('m-abc')).toBe(false)
+    expect(isMemoryId('m-ABCDEFGHIJ')).toBe(false)
+    expect(isMemoryId('x-0000000000')).toBe(false)
+    expect(isMemoryId(undefined)).toBe(false)
   })
 })
 
@@ -57,7 +79,7 @@ describe('FILE_NAME_RE', () => {
 })
 
 describe('validateEntry', () => {
-  it('normalizes a valid entry with defaulted paths', () => {
+  it('normalizes a valid entry, defaulting paths and generating an id', () => {
     const result = validateEntry({
       type: 'lessons',
       domain: 'PromotedPitfalls',
@@ -65,7 +87,7 @@ describe('validateEntry', () => {
       layer: 'project',
       entry: '某 API 已改签名',
     })
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       type: 'lessons',
       domain: 'PromotedPitfalls',
       scope: '全项目',
@@ -74,6 +96,7 @@ describe('validateEntry', () => {
       entryPoint: '-',
       references: '-',
     })
+    expect(isMemoryId(result.id)).toBe(true)
   })
 
   it('rejects an unknown type', () => {

@@ -1,9 +1,9 @@
 /**
  * 长期记忆 JSONL → Markdown 投影的纯函数渲染。
  *
- * `.remember.md` 只是渲染投影(7 列 Markdown 表格),由本模块从归一化条目
- * 纯函数生成,绝不解析 Markdown。单元格内的 `|` 转义为 `\|`;system prompt
- * 注入用 {@link renderSummary} 只列条目文本,不注入整段历史。
+ * `.remember.md` 只是渲染投影(8 列 Markdown 表格:首列 id + 7 个字段),由本模块
+ * 从归一化条目纯函数生成,绝不解析 Markdown。单元格内的 `|` 转义为 `\|`;system
+ * prompt 注入用 {@link renderSummary} 只列条目文本,不注入整段历史。
  *
  * @module dsh-memory/render
  */
@@ -16,9 +16,10 @@ export function escapeCell(text: string): string {
   return text.replace(/\|/g, '\\|')
 }
 
-/** 渲染一条记忆为 7 列表格行(不含首尾换行)。 */
+/** 渲染一条记忆为 8 列表格行(首列 id + 7 个字段,不含首尾换行)。 */
 function renderRow(entry: MemoryEntry): string {
   const cells = [
+    entry.id,
     entry.type,
     entry.domain,
     entry.scope,
@@ -31,7 +32,7 @@ function renderRow(entry: MemoryEntry): string {
 }
 
 /**
- * 由归一化条目渲染 7 列 Markdown 表格(表头 + 分隔行 + 每行一条)。
+ * 由归一化条目渲染 8 列 Markdown 表格(表头 + 分隔行 + 每行一条)。
  * @param entries - 归一化后的记忆条目。
  * @returns 完整表格文本(末尾带一个换行)。
  */
