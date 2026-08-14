@@ -99,6 +99,25 @@ describe('append', () => {
     expect(result.jsonlPath).toContain(join(project, '.dsh', 'memory'))
     expect(readCatalog(memoryWriteRoots(project).project)!.entries).toHaveLength(1)
   })
+
+  it('persists non-empty entryPoint and references through jsonl, md, and catalog', () => {
+    const result = append(project, candidate({
+      entryPoint: 'CLAUDE.md',
+      references: '<repo>/docs/concept.md',
+    }))
+    // jsonl 真相源保留两个非空字段。
+    const jsonl = readFileSync(result.jsonlPath!, 'utf8')
+    expect(jsonl).toContain('"entryPoint":"CLAUDE.md"')
+    expect(jsonl).toContain('"references":"<repo>/docs/concept.md"')
+    // MD 渲染投影同样保留(表格单元格含这两个路径)。
+    const md = readFileSync(result.mdPath!, 'utf8')
+    expect(md).toContain('CLAUDE.md')
+    expect(md).toContain('<repo>/docs/concept.md')
+    // find 返回完整字段。
+    const found = find(project, { id: result.entry.id })
+    expect(found[0]!.entry.entryPoint).toBe('CLAUDE.md')
+    expect(found[0]!.entry.references).toBe('<repo>/docs/concept.md')
+  })
 })
 
 describe('update', () => {
