@@ -1,0 +1,69 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "memory-catalog"
+title: "MemoryCatalog"
+description: "catalog.json(派生索引)的数据契约。每层 memory/ 目录一个,记录「记忆 id → 所在文件」;真相源仍是 .remember.jsonl,不一致以 jsonl 为准。"
+x-schema-version: 1
+type: object
+additionalProperties: false
+required: [version, entries]
+properties:
+  version:
+    type: integer
+    const: 1
+    description: "catalog 文件格式版本(CATALOG_VERSION)"
+  entries:
+    type: array
+    description: "索引条目(按 jsonl 文件扫描顺序)"
+    items:
+      $ref: "#/$defs/CatalogEntry"
+$defs:
+  CatalogEntry:
+    type: object
+    additionalProperties: false
+    required: [id, file, type, domain, scope, layer, entry]
+    description: "一条索引:记忆 id → 所在文件(附少量定位字段,有意反规范化)"
+    properties:
+      id:
+        type: string
+        pattern: "^m-[0-9a-z]{10}$"
+        description: "记忆唯一编号(主键)"
+      file:
+        type: string
+        minLength: 1
+        description: "相对本层 memory/ 目录的 .remember.jsonl 路径"
+      type:
+        type: string
+        enum: [rules, lessons]
+      domain:
+        type: string
+        enum:
+          - OutputContract
+          - ToolGovernance
+          - RedLines
+          - Invariants
+          - NamingBijection
+          - ContractConstants
+          - CommandsRuntime
+          - DirScoped
+          - PathScopedRules
+          - WorkflowSOP
+          - QualityGates
+          - RebuildSpec
+          - ChangeSurface
+          - ADR
+          - DurablePrefs
+          - Glossary
+          - ExternalRefs
+          - PromotedPitfalls
+          - CodeFacts
+          - PastFixes
+          - Style
+      scope:
+        type: string
+        minLength: 1
+      layer:
+        type: string
+        enum: [global, user, project]
+      entry:
+        type: string
+        minLength: 1

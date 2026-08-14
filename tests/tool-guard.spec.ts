@@ -5,6 +5,7 @@ import type { MemoryEntry } from '../src/schema.js'
 function entry(type: 'rules' | 'lessons'): MemoryEntry {
   return {
     id: 'm-0000000000',
+    schemaVersion: 1,
     type,
     domain: 'DurablePrefs',
     scope: '全项目',

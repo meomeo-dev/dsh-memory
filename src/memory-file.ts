@@ -6,16 +6,18 @@
  *   < 项目 `<repo>/.agents/memory` < 项目 `<repo>/.dsh/memory`
  *
  * 真相源是 `.remember.jsonl`;本模块只做「发现 + 读取」,写盘(追加 / 重写 / 渲染
- * MD / 更新 catalog / 旧数据迁移)统一由 {@link ./store.js} 承载,避免两套独立写路径并存。
+ * MD / 更新 catalog)统一由 {@link ./store.js} 承载,避免两套独立写路径并存。读取时
+ * 对旧数据做「读即迁移 + 落盘」(补 id/schemaVersion 写回 jsonl,见 {@link ./migrate.js}),
+ * 保证只读层读旧数据不失败、且补出的 id 跨次读取稳定。
  *
  * @module dsh-memory/memory-file
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseEntry } from './schema.js'
+import { readJsonlMigrating } from './migrate.js'
 import type { MemoryEntry } from './schema.js'
 
 /** 内置记忆目录(包内 `memory/`);无内容时不存在,发现时跳过。 */
@@ -102,13 +104,9 @@ export function visibleMemoryDirs(cwd?: string): string[] {
   ]
 }
 
-/** 读取一个 jsonl 文件并逐行解析;文件不存在返回空。 */
+/** 读取一个 jsonl 文件并逐行解析(读即迁移,顺带补 id/schemaVersion 并落盘);文件不存在返回空。 */
 function readJsonl(jsonlPath: string): MemoryEntry[] {
-  if (!existsSync(jsonlPath)) return []
-  const text = readFileSync(jsonlPath, 'utf8')
-  return text.split('\n')
-    .filter(line => line.trim().length > 0)
-    .map((line, index) => parseEntry(line, index + 1))
+  return readJsonlMigrating(jsonlPath).entries
 }
 
 /** 从给定目录按类型读取所有 jsonl 文件(按路径排序)。 */

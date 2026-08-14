@@ -50,7 +50,8 @@ dsh --profile demo
 - [design.md](docs/design.md) —— 技术设计:接缝、目录发现、数据模型、工具、AC
 - [auto-extraction.md](docs/auto-extraction.md) —— 自动提取设计:三种触发形态、抽取器、抽取窗口
 - [memory-review.md](docs/memory-review.md) —— 记忆寻址、目录与质检:唯一编号 id、catalog、review
+- [data-contract.md](docs/data-contract.md) —— 数据契约与演进式数据设计:ER/3NF、Data+Schema+Migrate
 
 ## 状态
 
-已实现主动记忆(remember / recall / forget)+ 质检(review)+ 自动提取(auto-extraction)。单元测试 108 个全绿(模型调用以 mock 注入);召回 / 质检 / 抽取需真实 `DEEPSEEK_API_KEY` 端到端验证,npm 发布待人工配置 Automation token 后经 release workflow 触发。
+已实现主动记忆(remember / recall / forget)+ 质检(review)+ 自动提取(auto-extraction)+ 数据契约(schema.yaml + 迁移引擎)。单元测试 117 个全绿(模型调用以 mock 注入);召回 / 质检 / 抽取需真实 `DEEPSEEK_API_KEY` 端到端验证,npm 发布待人工配置 Automation token 后经 release workflow 触发。

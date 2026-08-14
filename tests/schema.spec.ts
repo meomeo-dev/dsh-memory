@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   DOMAINS,
   FILE_NAME_RE,
+  LAYERS,
   MEMORY_ENTRY_SCHEMA,
   MEMORY_ID_RE,
   MEMORY_TYPES,
+  SCHEMA_VERSION,
   generateMemoryId,
   isMemoryId,
-  parseEntry,
   TABLE_HEADER,
   TABLE_SEPARATOR,
   validateEntry,
@@ -16,6 +17,8 @@ import type { MemoryEntry } from '../src/schema.js'
 
 function entry(overrides: Record<string, unknown> = {}): MemoryEntry {
   return {
+    id: 'm-0000000000',
+    schemaVersion: 1,
     type: 'rules',
     domain: 'DurablePrefs',
     scope: '全项目',
@@ -37,7 +40,12 @@ describe('contract constants', () => {
     expect(new Set(DOMAINS).size).toBe(21)
   })
 
-  it('exposes an 8-column header and separator', () => {
+  it('lists exactly 3 layers', () => {
+    expect(LAYERS).toEqual(['global', 'user', 'project'])
+  })
+
+  it('exposes the current schema version and an 8-column header and separator', () => {
+    expect(SCHEMA_VERSION).toBe(1)
     expect(TABLE_HEADER).toHaveLength(8)
     expect(TABLE_SEPARATOR).toBe('|---|---|---|---|---|---|---|---|')
   })
@@ -78,25 +86,30 @@ describe('FILE_NAME_RE', () => {
   })
 })
 
-describe('validateEntry', () => {
-  it('normalizes a valid entry, defaulting paths and generating an id', () => {
-    const result = validateEntry({
-      type: 'lessons',
-      domain: 'PromotedPitfalls',
-      scope: '全项目',
-      layer: 'project',
-      entry: '某 API 已改签名',
-    })
+describe('validateEntry (strict)', () => {
+  it('accepts a complete record and defaults paths', () => {
+    const result = validateEntry(entry())
     expect(result).toMatchObject({
-      type: 'lessons',
-      domain: 'PromotedPitfalls',
+      id: 'm-0000000000',
+      schemaVersion: 1,
+      type: 'rules',
+      domain: 'DurablePrefs',
       scope: '全项目',
-      layer: 'project',
-      entry: '某 API 已改签名',
+      layer: 'user',
+      entry: '提交信息用 Conventional Commits',
       entryPoint: '-',
       references: '-',
     })
-    expect(isMemoryId(result.id)).toBe(true)
+  })
+
+  it('rejects a record missing an id', () => {
+    const { id: _id, ...rest } = entry()
+    expect(() => validateEntry(rest)).toThrow(/id/)
+  })
+
+  it('rejects a record missing a schemaVersion', () => {
+    const { schemaVersion: _version, ...rest } = entry()
+    expect(() => validateEntry(rest)).toThrow(/schemaVersion/)
   })
 
   it('rejects an unknown type', () => {
@@ -123,22 +136,6 @@ describe('validateEntry', () => {
     expect(() => validateEntry(noDomain)).toThrow(/domain/)
     const { layer: _layer, ...noLayer } = entry()
     expect(() => validateEntry(noLayer)).toThrow(/layer/)
-  })
-})
-
-describe('parseEntry', () => {
-  it('parses a valid JSON line', () => {
-    const result = parseEntry('{"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"两空格缩进"}', 3)
-    expect(result.entryPoint).toBe('-')
-    expect(result.references).toBe('-')
-  })
-
-  it('rejects invalid JSON with a line number', () => {
-    expect(() => parseEntry('{not json', 7)).toThrow(/remember\.jsonl:7.*invalid JSON/)
-  })
-
-  it('rejects schema-invalid JSON with a line number', () => {
-    expect(() => parseEntry('{"type":"todo"}', 2)).toThrow(/remember\.jsonl:2/)
   })
 })
 

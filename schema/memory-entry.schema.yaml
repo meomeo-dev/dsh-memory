@@ -1,0 +1,66 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "memory-entry"
+title: "MemoryEntry"
+description: "长期记忆条目(JSONL 一行)的数据契约。单一真相源:运行时 schemastery 校验器由 scripts/gen-schema.mjs 从本文件生成。"
+x-schema-version: 1
+type: object
+additionalProperties: false
+required: [id, schemaVersion, type, domain, scope, layer, entry]
+properties:
+  id:
+    type: string
+    pattern: "^m-[0-9a-z]{10}$"
+    description: "全局唯一编号 m- + 10 位 base36(crypto 随机)"
+  schemaVersion:
+    type: integer
+    minimum: 1
+    description: "schema 版本号(记录级,单调递增);旧数据缺省 0 由迁移引擎补齐"
+  type:
+    type: string
+    enum: [rules, lessons]
+    description: "记忆类型:rules 偏好/约束,lessons 经验教训"
+  domain:
+    type: string
+    enum:
+      - OutputContract
+      - ToolGovernance
+      - RedLines
+      - Invariants
+      - NamingBijection
+      - ContractConstants
+      - CommandsRuntime
+      - DirScoped
+      - PathScopedRules
+      - WorkflowSOP
+      - QualityGates
+      - RebuildSpec
+      - ChangeSurface
+      - ADR
+      - DurablePrefs
+      - Glossary
+      - ExternalRefs
+      - PromotedPitfalls
+      - CodeFacts
+      - PastFixes
+      - Style
+    description: "知识领域(21 个 closed 枚举之一)"
+  scope:
+    type: string
+    minLength: 1
+    description: "影响范围:作用于哪个子系统 / 模块(自由文本);与 domain 正交成对"
+  layer:
+    type: string
+    enum: [global, user, project]
+    description: "落点层:物理存储位置(存储元数据,不参与语义定位)"
+  entry:
+    type: string
+    minLength: 1
+    description: "一句话条目文本"
+  entryPoint:
+    type: string
+    default: "-"
+    description: "关联入口文件路径,缺省 -"
+  references:
+    type: string
+    default: "-"
+    description: "关联参考文件路径,缺省 -"

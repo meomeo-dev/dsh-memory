@@ -15,6 +15,7 @@ import type { MemoryEntry, MemoryId } from '../src/schema.js'
 function entry(id: string, overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     id: id as MemoryId,
+    schemaVersion: 1,
     type: 'rules',
     domain: 'DurablePrefs',
     scope: '全项目',

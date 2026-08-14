@@ -16,13 +16,14 @@
  * @module dsh-memory/store
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { checkMarkdown } from './check.js'
 import { visibleMemoryDirs, writeRootFor } from './memory-file.js'
 import type { MemoryFile } from './memory-file.js'
+import { readJsonlMigrating, serializeEntry } from './migrate.js'
 import { renderMd } from './render.js'
-import { MAX_LESSON_CHARS, parseEntryMigrating, validateEntry } from './schema.js'
+import { MAX_LESSON_CHARS, SCHEMA_VERSION, generateMemoryId, validateEntry } from './schema.js'
 import type { DomainId, LayerId, MemoryEntry, MemoryEntryInput, MemoryId, MemoryType } from './schema.js'
 
 /** catalog 文件格式版本(docs/memory-review.md §3 的 `version`)。 */
@@ -132,20 +133,6 @@ function mdPathOf(jsonlPath: string): string {
   return jsonlPath.replace(/\.jsonl$/, '.md')
 }
 
-/** 按确定性字段顺序序列化一条记忆(id 在前)。 */
-function serializeEntry(entry: MemoryEntry): string {
-  return JSON.stringify({
-    id: entry.id,
-    type: entry.type,
-    domain: entry.domain,
-    scope: entry.scope,
-    layer: entry.layer,
-    entry: entry.entry,
-    entryPoint: entry.entryPoint,
-    references: entry.references,
-  })
-}
-
 /**
  * 写一批条目到一对 jsonl / md 文件:先渲染 MD 并通过静态检查,再落盘。
  * @param jsonlPath - `.remember.jsonl` 目标路径。
@@ -166,17 +153,13 @@ function writeFilePair(jsonlPath: string, mdPath: string, entries: readonly Memo
 }
 
 /**
- * 读取一个 jsonl 文件并做旧数据迁移:缺失 `id` 的旧行补齐 id 后落盘(保证 id 稳定)。
+ * 读取一个 jsonl 文件并做旧数据迁移:读 + 迁移 + 落盘由 {@link readJsonlMigrating}
+ * 承担;若发生迁移,再重渲染 MD 保持投影同步。
  * @param jsonlPath - `.remember.jsonl` 路径。
- * @returns 该文件内全部条目(恒带 `id`)与是否发生了迁移。
+ * @returns 该文件内全部条目(恒带 `id` 与 `schemaVersion`)与是否发生了迁移。
  */
 function readFileMigrating(jsonlPath: string): { entries: MemoryEntry[]; migrated: boolean } {
-  if (!existsSync(jsonlPath)) return { entries: [], migrated: false }
-  const text = readFileSync(jsonlPath, 'utf8')
-  const lines = text.split('\n').filter(line => line.trim().length > 0)
-  const parsed = lines.map((line, index) => parseEntryMigrating(line, index + 1))
-  const migrated = parsed.some(result => result.migrated)
-  const entries = parsed.map(result => result.entry)
+  const { entries, migrated } = readJsonlMigrating(jsonlPath)
   if (migrated) writeFilePair(jsonlPath, mdPathOf(jsonlPath), entries)
   return { entries, migrated }
 }
@@ -275,7 +258,7 @@ function locate(cwd: string | undefined, id: MemoryId): {
  * @throws 当 schema 校验失败、entry 空白、lessons 超长、或渲染 MD 未通过静态检查。
  */
 export function append(cwd: string, candidate: MemoryEntryInput): AppendResult {
-  const entry = validateEntry(candidate)
+  const entry = validateEntry({ ...candidate, id: generateMemoryId(), schemaVersion: SCHEMA_VERSION })
   assertEntryConstraints(entry)
   if (entry.type === 'rules') {
     const duplicate = loadAllMigrating(cwd).flatMap(file => file.entries)

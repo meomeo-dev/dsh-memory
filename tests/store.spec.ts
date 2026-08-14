@@ -68,6 +68,7 @@ describe('append', () => {
 
     const jsonl = readFileSync(result.jsonlPath!, 'utf8')
     expect(jsonl).toContain(`"id":"${result.entry.id}"`)
+    expect(jsonl).toContain('"schemaVersion":1')
     expect(jsonl).toContain('"entry":"提交信息用 Conventional Commits"')
     expect(checkMarkdown(readFileSync(result.mdPath!, 'utf8'))).toEqual([])
 

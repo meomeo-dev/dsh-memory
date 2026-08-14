@@ -7,11 +7,11 @@
     "strict": true,
     "noImplicitAny": true,
     "declaration": true,
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "lib",
     "skipLibCheck": true,
     "esModuleInterop": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src"]
+  "include": ["src", "migrations"]
 }

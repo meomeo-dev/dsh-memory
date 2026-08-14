@@ -1,68 +1,39 @@
 /**
  * 长期记忆条目的领域模型与 JSONL 逐行 schema(单一真相源)。
  *
- * 一条记忆 = `.remember.jsonl` 的一行;本模块的 {@link MEMORY_ENTRY_SCHEMA} 是
- * 校验的唯一权威。`type` 只含 `rules` / `lessons` 两类(不含 state/todo),见
- * docs/concept.md §4;`domain` 是 21 个 closed 枚举之一,见 docs/concept.md §3。
+ * 数据契约的运行时真相源是 {@link ./schema.generated.js}(由 schema/memory-entry.schema.yaml
+ * 经 scripts/gen-schema.mjs 生成,勿手改);本模块 re-export 其数据契约常量
+ * (`MEMORY_TYPES` / `DOMAINS` / `LAYERS` / `MEMORY_ID_RE` / `SCHEMA_VERSION` /
+ * `MEMORY_ENTRY_SCHEMA`)与类型,并保留非数据契约的手写逻辑:记忆 id 生成 / 判定、
+ * 工具输入类型、渲染常量、文件命名正则,以及「严格校验」入口 {@link validateEntry}。
  *
- * 每条记忆带一个全局唯一编号 {@link MemoryId}(docs/memory-review.md §2):
- * `m-` + 10 位 base36(crypto 随机)。id 随记忆一生不变,是 catalog 的主键与按
- * id 精确操作(update / delete / find)的句柄。
- *
- * 契约常量(工具校验与文件校验共用)也在此导出,避免两处漂移。
+ * 一条记忆 = `.remember.jsonl` 的一行;`type` 只含 `rules` / `lessons` 两类(不含
+ * state/todo),见 docs/concept.md §4;`domain` 是 21 个 closed 枚举之一,见
+ * docs/concept.md §3。`validateEntry` 只接受完整合法记录(id / schemaVersion 由
+ * generated 的 required 强制),id 补齐由存储层显式生成与迁移引擎负责。
  *
  * @module dsh-memory/schema
  */
 
 import { randomBytes } from 'node:crypto'
-import z from '@deepseek-ai/schemastery'
-import type Schema from '@deepseek-ai/schemastery'
+import { MEMORY_ENTRY_SCHEMA, MEMORY_ID_RE } from './schema.generated.js'
+import type { DomainId, LayerId, MemoryEntry, MemoryId, MemoryType } from './schema.generated.js'
 
-/** 长期记忆只含的两类信息(`rules` 偏好/约束,`lessons` 经验教训)。 */
-export const MEMORY_TYPES = ['rules', 'lessons'] as const
-
-/** 一条记忆的类型(长期记忆不含 state/todo)。 */
-export type MemoryType = (typeof MEMORY_TYPES)[number]
-
-/** 21 个知识领域 id(closed 枚举,与 docs/concept.md §3 一一对应)。 */
-export const DOMAINS = [
-  'OutputContract',
-  'ToolGovernance',
-  'RedLines',
-  'Invariants',
-  'NamingBijection',
-  'ContractConstants',
-  'CommandsRuntime',
-  'DirScoped',
-  'PathScopedRules',
-  'WorkflowSOP',
-  'QualityGates',
-  'RebuildSpec',
-  'ChangeSurface',
-  'ADR',
-  'DurablePrefs',
-  'Glossary',
-  'ExternalRefs',
-  'PromotedPitfalls',
-  'CodeFacts',
-  'PastFixes',
-  'Style',
-] as const
-
-/** 一条记忆的知识领域 id。 */
-export type DomainId = (typeof DOMAINS)[number]
-
-/** 记忆的落点层(layer):Global / User / Project 三层物理存储位置。 */
-export const LAYERS = ['global', 'user', 'project'] as const
-
-/** 一条记忆的落点层 id。 */
-export type LayerId = (typeof LAYERS)[number]
-
-/** 记忆唯一编号:`m-` + 10 位 base36(crypto 随机),如 `m-3k9f2x8q1a`。 */
-export type MemoryId = `m-${string}`
-
-/** {@link MemoryId} 的运行时格式正则:`m-` 前缀 + 10 位 base36(`[0-9a-z]`)。 */
-export const MEMORY_ID_RE = /^m-[0-9a-z]{10}$/
+export {
+  SCHEMA_VERSION,
+  MEMORY_TYPES,
+  DOMAINS,
+  LAYERS,
+  MEMORY_ID_RE,
+  MEMORY_ENTRY_SCHEMA,
+} from './schema.generated.js'
+export type {
+  DomainId,
+  LayerId,
+  MemoryEntry,
+  MemoryId,
+  MemoryType,
+} from './schema.generated.js'
 
 /**
  * 判断一个值是否为合法 {@link MemoryId}(运行时格式校验)。
@@ -84,30 +55,6 @@ export function isMemoryId(value: unknown): value is MemoryId {
 export function generateMemoryId(): MemoryId {
   const suffix = randomBytes(8).readBigUInt64BE(0).toString(36).padStart(10, '0').slice(0, 10)
   return `m-${suffix}` as MemoryId
-}
-
-/**
- * 一条长期记忆条目的运行时形状(JSONL 一行,schema 归一化后)。
- *
- * `id` 是全局唯一编号;`entryPoint` / `references` 缺省为 `-`(无关联文件路径)。
- */
-export interface MemoryEntry {
-  /** 全局唯一编号(随记忆一生不变,catalog 主键)。 */
-  readonly id: MemoryId
-  /** 记忆类型:偏好/约束,或经验教训。 */
-  readonly type: MemoryType
-  /** 知识领域(21 个 closed 枚举之一)。 */
-  readonly domain: DomainId
-  /** 影响范围:作用于哪个子系统 / 模块(自由文本,非空);与 domain 正交成对。 */
-  readonly scope: string
-  /** 落点层:global / user / project(物理存储位置,元数据,不参与语义定位)。 */
-  readonly layer: LayerId
-  /** 一句话条目文本(非空)。 */
-  readonly entry: string
-  /** 关联入口文件路径,缺省 `-`。 */
-  readonly entryPoint: string
-  /** 关联参考文件路径,缺省 `-`。 */
-  readonly references: string
 }
 
 /** 新建记忆的候选输入(无 `id`;`id` 由存储层生成,`entryPoint`/`references` 缺省 `-`)。 */
@@ -156,82 +103,27 @@ export const MAX_LESSON_CHARS = 300
  */
 export const FILE_NAME_RE = /^\d{4}-\d{2}-\d{2}(?:\.[a-z0-9-]+)?\.(rules|lessons)\.remember\.(jsonl|md)$/
 
-/**
- * JSONL 记录 schema:逐行校验的单一真相源。
- *
- * `id` 字段为可选(不标 `.required()`):兼容尚无 id 的旧行与新建候选;归一化时
- * 由 {@link validateEntry} / {@link parseEntryMigrating} 统一补齐,保证返回的
- * {@link MemoryEntry.id} 恒存在。其余字段(`type` / `domain` / `scope` / `layer` /
- * `entry`)均标 `.required()`:列缺失即拒绝,满足 design.md AC 4「列缺失 → 拒绝」。
- */
-export const MEMORY_ENTRY_SCHEMA: Schema<MemoryEntry> = z.object({
-  id: z.string().pattern(MEMORY_ID_RE),
-  type: z.union([...MEMORY_TYPES]).required(),
-  domain: z.union([...DOMAINS]).required(),
-  scope: z.string().min(1).required(),
-  layer: z.union([...LAYERS]).required(),
-  entry: z.string().min(1).required(),
-  entryPoint: z.string().default('-'),
-  references: z.string().default('-'),
-}) as unknown as Schema<MemoryEntry>
-
 /** 由 schemastery 的 ValidationError 提取可读文本。 */
 function describeSchemaError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
 /**
- * 校验一个候选条目(任意来源,如 JSON.parse 产物)并归一化。
+ * 严格校验一条完整记录(JSONL 一行)。
  *
- * 候选可缺 `id`(旧行或新建输入):缺失时惰性生成一个 {@link MemoryId} 补齐,
- * 保证返回值恒带 `id`。`entryPoint` / `references` 缺省为 `-`。
- * @param entry - 候选条目。
+ * 只接受「完整合法记录」:`id` / `schemaVersion` 由 generated schema 的 required 强制,
+ * 缺一即拒绝;`entryPoint` / `references` 缺省为 `-`。不在此处惰性补 `id`——id 补齐由
+ * 存储层 `append` 显式生成、迁移引擎 {@link ./migrate.js} 负责。
+ * @param entry - 完整候选记录。
  * @param lineNumber - 可选行号,用于把错误定位到 JSONL 的某一行。
- * @returns 归一化后的 {@link MemoryEntry}(恒带 `id`)。
- * @throws 当类型 / 域 / 范围非法、entry 为空、或列缺失、或 id 格式非法。
+ * @returns 校验(并归一化)后的 {@link MemoryEntry}。
+ * @throws 当类型 / 域 / 范围非法、entry 为空、id / schemaVersion 缺失或非法。
  */
 export function validateEntry(entry: unknown, lineNumber?: number): MemoryEntry {
   const where = lineNumber === undefined ? 'remember.jsonl' : `remember.jsonl:${lineNumber}`
   try {
-    const normalized = MEMORY_ENTRY_SCHEMA(entry as unknown as MemoryEntry) as unknown as Record<string, unknown>
-    if (!isMemoryId(normalized.id)) normalized.id = generateMemoryId()
-    return normalized as unknown as MemoryEntry
+    return MEMORY_ENTRY_SCHEMA(entry as unknown as MemoryEntry)
   } catch (error) {
     throw new Error(`${where}: ${describeSchemaError(error)}`)
   }
-}
-
-/**
- * 解析 JSONL 的一行为一条记忆(解析 + 校验 + 补 id)。
- *
- * 旧行缺 `id` 时惰性生成并返回(不落盘;需落盘的迁移请用 {@link parseEntryMigrating})。
- * @param line - 一行 JSON 文本。
- * @param lineNumber - 可选行号,用于错误定位。
- * @returns 归一化后的 {@link MemoryEntry}(恒带 `id`)。
- * @throws 当 JSON 非法或 schema 校验失败。
- */
-export function parseEntry(line: string, lineNumber?: number): MemoryEntry {
-  return parseEntryMigrating(line, lineNumber).entry
-}
-
-/**
- * 解析 JSONL 的一行为一条记忆,并报告该行是否发生了旧数据迁移(缺 id 被补齐)。
- *
- * 这是存储层做「惰性迁移 + 落盘」的入口:读旧行时发现缺 id,补一个 id 并标记
- * `migrated: true`,由调用方决定是否把补齐后的 id 写回 jsonl,保证 id 稳定。
- * @param line - 一行 JSON 文本。
- * @param lineNumber - 可选行号,用于错误定位。
- * @returns 归一化条目与「是否补齐了 id」的标记。
- * @throws 当 JSON 非法、schema 校验失败、或 id 存在但格式非法(视为数据损坏)。
- */
-export function parseEntryMigrating(line: string, lineNumber?: number): { entry: MemoryEntry; migrated: boolean } {
-  const where = lineNumber === undefined ? 'remember.jsonl' : `remember.jsonl:${lineNumber}`
-  let raw: unknown
-  try {
-    raw = JSON.parse(line)
-  } catch (error) {
-    throw new Error(`${where}: invalid JSON: ${describeSchemaError(error)}`)
-  }
-  const hadId = typeof raw === 'object' && raw !== null && isMemoryId((raw as Record<string, unknown>).id)
-  return { entry: validateEntry(raw, lineNumber), migrated: !hadId }
 }

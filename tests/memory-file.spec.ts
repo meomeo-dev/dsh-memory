@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { discoverEntries, memoryWriteRoots, visibleMemoryDirs } from '../src/memory-file.js'
+import { isMemoryId } from '../src/schema.js'
 
 let dshHome: string
 let agentsHome: string
@@ -49,8 +50,8 @@ describe('visibleMemoryDirs', () => {
   })
 })
 
-describe('discoverEntries (lenient read of legacy rows)', () => {
-  it('reads a jsonl row without an id (legacy data) without throwing', () => {
+describe('discoverEntries (migrating read of legacy rows)', () => {
+  it('migrates a jsonl row without an id and keeps its id stable across reads', () => {
     const dir = join(dshHome, 'memory')
     mkdirSync(dir, { recursive: true })
     writeFileSync(
@@ -58,8 +59,14 @@ describe('discoverEntries (lenient read of legacy rows)', () => {
       '{"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"两空格缩进","entryPoint":"-","references":"-"}\n',
       'utf8',
     )
-    const entries = discoverEntries(project)
-    expect(entries.map(e => e.entry)).toEqual(['两空格缩进'])
+    const first = discoverEntries(project)
+    expect(first.map(e => e.entry)).toEqual(['两空格缩进'])
+    expect(isMemoryId(first[0]!.id)).toBe(true)
+    expect(first[0]!.schemaVersion).toBe(1)
+
+    // 迁移已落盘,再次读取补出同一 id(而非每次读生成临时 id)。
+    const second = discoverEntries(project)
+    expect(second[0]!.id).toBe(first[0]!.id)
   })
 })
 
@@ -73,13 +80,13 @@ describe('project-layer precedence', () => {
     const base = '2026-08-13.rules.remember'
     writeFileSync(
       join(userDir, `${base}.jsonl`),
-      '{"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"用户层条目","entryPoint":"-","references":"-"}\n',
+      '{"id":"m-0000000000","schemaVersion":1,"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"用户层条目","entryPoint":"-","references":"-"}\n',
       'utf8',
     )
     // 项目层同名文件覆盖。
     writeFileSync(
       join(project, '.dsh', 'memory', `${base}.jsonl`),
-      '{"type":"rules","domain":"Style","scope":"全项目","layer":"project","entry":"项目层条目","entryPoint":"-","references":"-"}\n',
+      '{"id":"m-0000000001","schemaVersion":1,"type":"rules","domain":"Style","scope":"全项目","layer":"project","entry":"项目层条目","entryPoint":"-","references":"-"}\n',
       'utf8',
     )
     const entries = discoverEntries(project)

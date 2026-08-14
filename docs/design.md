@@ -206,3 +206,4 @@ interface MemoryEntry {
 
 - **自动提取(三种触发形态)** → [auto-extraction.md](auto-extraction.md):信号词 / 计数器 / 事件+计数器 三形态、dsh 事件落点、抽取窗口(与主会话上下文一致)、配置项与「model-visible ⟺ logged」约束。
 - **记忆寻址、目录与质检(Review)** → [memory-review.md](memory-review.md):唯一编号 id、catalog、切 `deepseek-v4-pro` 的 review 质检、`/lmemory review` 闭环、按 id 的 query/update/delete 工具。
+- **数据契约与演进式数据设计** → [data-contract.md](data-contract.md):ER/3NF、`schema/*.schema.yaml` 单一真相源 + codegen、记录级 `schemaVersion`、`migrations/` 迁移引擎(Data + Schema + Migrate 三件套)。

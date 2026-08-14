@@ -34,7 +34,7 @@ function seedProjectFile(entry: string): void {
   mkdirSync(dir, { recursive: true })
   writeFileSync(
     join(dir, '2026-08-13.rules.remember.jsonl'),
-    `${JSON.stringify({ type: 'rules', domain: 'Style', scope: '全项目', layer: 'project', entry, entryPoint: '-', references: '-' })}\n`,
+    `${JSON.stringify({ id: 'm-0000000000', schemaVersion: 1, type: 'rules', domain: 'Style', scope: '全项目', layer: 'project', entry, entryPoint: '-', references: '-' })}\n`,
     'utf8',
   )
 }
