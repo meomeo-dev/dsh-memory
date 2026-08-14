@@ -316,6 +316,8 @@ dsh 的 session 暴露 `deriveMessages(): Message[]`(`packages/core/session/src/
 
 > 两个抽取提示词模板见 §5.3;原「单一 `extractPrompt`」按 type 拆分为两个,分别驱动 rules / lessons 抽取节点。
 
+> **v1 落地范围**:`extractMode` 三个枚举值与 `signalWords` 配置键已可经 `/lmemory config set` 读写,但 v1 只接线 `event-counter`(形态 3);`signal` / `counter` 两个形态未接线,`signalWords` 暂不参与触发判断。详见 §10。
+
 ## 8. 架构约束(实现前必须想清)
 
 自动抽取写记忆 = 一个潜在的 **model-visible 输入/输出**。
@@ -332,3 +334,13 @@ dsh 的 session 暴露 `deriveMessages(): Message[]`(`packages/core/session/src/
 - ❌ 不做基于 embedding 的「该不该记」判断(先做信号词 + v4-flash 抽取)。
 - ⏳ 抽取质量评估(误抽率/漏抽率)需要真实数据,留待启用后观察。
 - ⏳ 计数器阈值、信号词集的最佳默认值,需在真实使用中调优。
+
+## 10. v1 落地决策(已确认偏离)
+
+v1 只落地**形态 3(event + counter)**。以下三点是本扩展 v1 相对本文档其余章节的**已确认偏离**,作为明确决策记录:
+
+1. **`extractMode` 只接 `event-counter`**。三个枚举值(`signal` / `counter` / `event-counter`)与 `signalWords` 配置键已在配置层补齐、可经 `/lmemory config set` 读写,但 v1 的触发监听只实现形态 3:`signal`(监听 `session/event` 命中信号词)与 `counter`(`turn/end` 计数)两个形态**未接线**,`signalWords` 当前不参与任何触发判断。放行判断(`shouldAutoExtract`)仅当 `autoExtract && extractMode === 'event-counter'` 时为真。
+
+2. **lessons「同主题合并」降级为「按 entry 精确去重」**。§5.2 / §5.5 描述的「与已有 lessons 判是否同主题合并(≤300 字)→ 合并或新增(store.update)」未在 v1 实现:lessons 候选先按 entry 文本与已有 lessons 精确比对去重(`filterNovel`),去重后的候选只走 `store.append` 新增,**不合并、不调 `store.update`**。同一主题的近似重复可能以不同 entry 文本并存;是否补同主题合并,留待真实数据验证后再定。
+
+3. **`agent/session-start` 抽取在 fresh 会话基本是空操作**。§3 形态 3 给 session-start 的语义是「回顾上次会话未沉淀的尾部」,但 §4 钉死抽取输入 = `deriveMessages()`(主会话此刻上下文)——fresh 会话在 `agent/session-start` 触发时 `deriveMessages()` 为空,抽取只会以空 transcript 发出两次 v4-flash 调用并返回空,不写任何记忆;「回顾尾部」仅在 resume / compact 回放历史、`deriveMessages()` 非空时才有实际内容。v1 保留该监听(冷却计数器随新会话归零,resume 场景受益),但**不承诺「回顾上次会话尾部」语义**。

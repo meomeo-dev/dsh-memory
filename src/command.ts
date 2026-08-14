@@ -24,9 +24,10 @@ export type LmemoryCommand =
   | { readonly kind: 'config-get'; readonly key?: string }
   | { readonly kind: 'config-set'; readonly key: string; readonly value: string }
   | { readonly kind: 'review'; readonly filter?: ReviewFilter }
+  | { readonly kind: 'catalog' }
 
 /** 命令用法回显文案。 */
-export const USAGE = 'Usage: /lmemory status | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain]'
+export const USAGE = 'Usage: /lmemory status | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild'
 
 /**
  * 解析 `/lmemory` 命令参数。
@@ -66,6 +67,9 @@ export function parseLmemoryCommand(rawInput: string): LmemoryCommand {
       return { kind: 'review', filter: { kind: 'domain', value: token as DomainId } }
     }
     return { kind: 'help' }
+  }
+  if (head === 'catalog' && parts[1]?.toLowerCase() === 'rebuild') {
+    return { kind: 'catalog' }
   }
   return { kind: 'help' }
 }

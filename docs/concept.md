@@ -36,30 +36,30 @@
 
 ## 3. 长期记忆的 Domain(知识领域清单)
 
-记忆必须归入以下 domain 之一(closed 枚举,新 domain 需显式扩展):
+记忆必须归入以下 domain 之一(closed 枚举,新 domain 需显式扩展)。`Domain(id)` 列是**机器可读的 id 形式**(camelCase,写入 JSONL 的 `domain` 字段与工具 `domain` 枚举):
 
-| # | Domain | 中文 | 例(记忆主题) |
+| # | Domain(id) | 中文 | 例(记忆主题) |
 |---|---|---|---|
-| 1 | Output Contract | 输出契约 | 某接口的响应字段、必填项 |
-| 2 | Tool Governance | 工具作用域治理 | 某工具在什么作用域可用/禁用 |
-| 3 | Red Lines | 不可逆红线 | 绝不删除生产数据、绝不裸 `--force` |
+| 1 | OutputContract | 输出契约 | 某接口的响应字段、必填项 |
+| 2 | ToolGovernance | 工具作用域治理 | 某工具在什么作用域可用/禁用 |
+| 3 | RedLines | 不可逆红线 | 绝不删除生产数据、绝不裸 `--force` |
 | 4 | Invariants | 项目不变量 | 如 R1/R2/R3 这类不可违反的约定 |
-| 5 | Naming Bijection | 命名机械对应 | issue↔分支↔worktree 三者命名映射 |
-| 6 | Contract Constants | 契约常量 | `TYPES=[feat,fix,...]`、`MAIN_BRANCH=main` |
-| 7 | Commands & Runtime | 命令与运行时特性 | 某命令的 flag、某脚本的行为 |
-| 8 | Dir-Scoped | 目录级约定 | `issues/` 的存放规则 |
-| 9 | Path-Scoped Rules | 路径级硬约束 | 某文件必须在某路径、不得移动 |
-| 10 | Workflow SOP | 工作流工序 | 「先 commit 再切 worktree」这类顺序 |
-| 11 | Quality Gates | 门禁清单 | 提交前必跑的检查项 |
-| 12 | Rebuild Spec | 脚本重建规格 | 某脚本缺失时如何按职责重建 |
-| 13 | Change Surface | 架构与跨层改造面 | 改某功能要动哪些跨层文件 |
+| 5 | NamingBijection | 命名机械对应 | issue↔分支↔worktree 三者命名映射 |
+| 6 | ContractConstants | 契约常量 | `TYPES=[feat,fix,...]`、`MAIN_BRANCH=main` |
+| 7 | CommandsRuntime | 命令与运行时特性 | 某命令的 flag、某脚本的行为 |
+| 8 | DirScoped | 目录级约定 | `issues/` 的存放规则 |
+| 9 | PathScopedRules | 路径级硬约束 | 某文件必须在某路径、不得移动 |
+| 10 | WorkflowSOP | 工作流工序 | 「先 commit 再切 worktree」这类顺序 |
+| 11 | QualityGates | 门禁清单 | 提交前必跑的检查项 |
+| 12 | RebuildSpec | 脚本重建规格 | 某脚本缺失时如何按职责重建 |
+| 13 | ChangeSurface | 架构与跨层改造面 | 改某功能要动哪些跨层文件 |
 | 14 | ADR | 决策与否决理由 | 某方案为何被采纳/否决 |
-| 15 | Durable Prefs | 用户长期偏好 | 用户习惯的格式、技术栈限制 |
+| 15 | DurablePrefs | 用户长期偏好 | 用户习惯的格式、技术栈限制 |
 | 16 | Glossary | 术语表 | 项目里某术语的确切含义 |
-| 17 | External Refs | 外部资源 | 权威文档 URL、上游仓库 |
-| 18 | Promoted Pitfalls | 已知陷阱 | 踩过的坑、API 变更 |
-| 19 | Code Facts | 代码结构事实 | 某模块在哪、负责什么 |
-| 20 | Past Fixes | 历史修复过程 | 某 bug 的根因与修法结论 |
+| 17 | ExternalRefs | 外部资源 | 权威文档 URL、上游仓库 |
+| 18 | PromotedPitfalls | 已知陷阱 | 踩过的坑、API 变更 |
+| 19 | CodeFacts | 代码结构事实 | 某模块在哪、负责什么 |
+| 20 | PastFixes | 历史修复过程 | 某 bug 的根因与修法结论 |
 | 21 | Style | 风格/格式规范 | 命名、注释、提交格式约定 |
 
 ## 4. 长期记忆只含两类高价值信息(提取原则)
@@ -89,7 +89,7 @@
 | 文件 | 角色 | 谁读写 |
 |---|---|---|
 | `.remember.jsonl` | **真相源**:一行一条记忆,schema 可校验 | 插件(读写);人可看(可选) |
-| `.remember.md` | **渲染投影**:7 列 Markdown 表格 | 插件生成(纯函数渲染);人/agent 阅读 |
+| `.remember.md` | **渲染投影**:8 列 Markdown 表格 | 插件生成(纯函数渲染);人/agent 阅读 |
 
 为什么 JSONL 为真相源:
 
@@ -100,17 +100,17 @@
 **JSONL 记录 schema**(一行一条):
 
 ```json
-{"type":"rules","domain":"DurablePrefs","scope":"全项目","layer":"user","entry":"提交信息用 Conventional Commits","entryPoint":"-","references":"<repo_root>/CLAUDE.md"}
+{"id":"m-3k9f2x8q1a","type":"rules","domain":"DurablePrefs","scope":"全项目","layer":"user","entry":"提交信息用 Conventional Commits","entryPoint":"-","references":"<repo_root>/CLAUDE.md"}
 ```
 
-字段与 7 列一一对应:`type` / `domain` / `scope` / `layer` / `entry` / `entryPoint` / `references`。其中 `domain` 与 `scope` 是**语义定位的正交对**(共同定位一条记忆),`layer` 是**存储元数据**(不参与语义定位)。
+字段与 8 列一一对应:`id` / `type` / `domain` / `scope` / `layer` / `entry` / `entryPoint` / `references`。其中 `id` 是全局唯一编号(见 [memory-review.md](memory-review.md) §2),`domain` 与 `scope` 是**语义定位的正交对**(共同定位一条记忆),`layer` 是**存储元数据**(不参与语义定位)。
 
-**MD 渲染**(纯函数,由 jsonl 派生,7 列):
+**MD 渲染**(纯函数,由 jsonl 派生,8 列):
 
 ```markdown
-| 类型 | 所属知识领域(domain) | 影响范围 (Scope) | Layer (落点层) | 条目 | entry point (file path) | references (file path) |
-|---|---|---|---|---|---|---|
-| rules | DurablePrefs | 全项目 | user | 提交信息用 Conventional Commits | - | <repo_root>/CLAUDE.md |
+| id | 类型 | 所属知识领域 (domain) | 影响范围 (Scope) | Layer (落点层) | 条目 | entry point (file path) | references (file path) |
+|---|---|---|---|---|---|---|---|
+| m-3k9f2x8q1a | rules | DurablePrefs | 全项目 | user | 提交信息用 Conventional Commits | - | <repo_root>/CLAUDE.md |
 ```
 
 渲染后必须通过 **Markdown 语法静态检查**(表格列数一致、无未闭合管道、`entry` 内的 `|` 已转义)。
@@ -139,6 +139,8 @@ memory/YYYY-MM-DD[.<partition>].<memory_type>.remember.{jsonl|md}
 | Global | 全局 | 跨所有项目生效(几乎不用) |
 | User | `~/.dsh/memory/` 或 `~/.agents/memory/` | 用户级,跨项目 |
 | Project | `<repo>/.dsh/memory/` 或 `<repo>/.agents/memory/` | 项目级,单仓库 |
+
+写入 JSONL 的 `layer` 字段与工具 `layer` 枚举取**小写 id**:`global` / `user` / `project`(上表首字母大写仅为概念名)。
 
 ## 9. 召回:多 v4-flash 记忆节点 team
 

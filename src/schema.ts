@@ -161,14 +161,15 @@ export const FILE_NAME_RE = /^\d{4}-\d{2}-\d{2}(?:\.[a-z0-9-]+)?\.(rules|lessons
  *
  * `id` 字段为可选(不标 `.required()`):兼容尚无 id 的旧行与新建候选;归一化时
  * 由 {@link validateEntry} / {@link parseEntryMigrating} 统一补齐,保证返回的
- * {@link MemoryEntry.id} 恒存在。
+ * {@link MemoryEntry.id} 恒存在。其余字段(`type` / `domain` / `scope` / `layer` /
+ * `entry`)均标 `.required()`:列缺失即拒绝,满足 design.md AC 4「列缺失 → 拒绝」。
  */
 export const MEMORY_ENTRY_SCHEMA: Schema<MemoryEntry> = z.object({
   id: z.string().pattern(MEMORY_ID_RE),
-  type: z.union([...MEMORY_TYPES]),
-  domain: z.union([...DOMAINS]),
+  type: z.union([...MEMORY_TYPES]).required(),
+  domain: z.union([...DOMAINS]).required(),
   scope: z.string().min(1).required(),
-  layer: z.union([...LAYERS]),
+  layer: z.union([...LAYERS]).required(),
   entry: z.string().min(1).required(),
   entryPoint: z.string().default('-'),
   references: z.string().default('-'),

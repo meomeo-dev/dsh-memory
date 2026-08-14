@@ -52,4 +52,10 @@ describe('parseLmemoryCommand', () => {
   it('falls back to help for an unrecognized review filter', () => {
     expect(parseLmemoryCommand('review bogus')).toEqual({ kind: 'help' })
   })
+
+  it('parses catalog rebuild', () => {
+    expect(parseLmemoryCommand('catalog rebuild')).toEqual({ kind: 'catalog' })
+    expect(parseLmemoryCommand('catalog')).toEqual({ kind: 'help' })
+    expect(parseLmemoryCommand('catalog bogus')).toEqual({ kind: 'help' })
+  })
 })

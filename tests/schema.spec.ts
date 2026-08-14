@@ -115,6 +115,15 @@ describe('validateEntry', () => {
     const { entry: _entry, ...rest } = entry()
     expect(() => validateEntry(rest)).toThrow(/entry/)
   })
+
+  it('rejects a missing type, domain, or layer column', () => {
+    const { type: _type, ...noType } = entry()
+    expect(() => validateEntry(noType)).toThrow(/type/)
+    const { domain: _domain, ...noDomain } = entry()
+    expect(() => validateEntry(noDomain)).toThrow(/domain/)
+    const { layer: _layer, ...noLayer } = entry()
+    expect(() => validateEntry(noLayer)).toThrow(/layer/)
+  })
 })
 
 describe('parseEntry', () => {

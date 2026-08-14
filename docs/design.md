@@ -61,6 +61,7 @@ DeepSeek Harness 已有 `session-reference`(整段历史会话的有界引用),�
 
 ```ts
 interface MemoryEntry {
+  id: MemoryId                       // 全局唯一编号(m- + 10 位 base36),见 memory-review.md §2
   type: 'rules' | 'lessons'          // 长期记忆只含两类,不含 state/todo
   domain: DomainId                   // 21 个 closed 枚举之一,见 concept.md §3
   scope: string                      // 影响范围:具体子系统 / 模块(自由文本);与 domain 正交成对
@@ -74,13 +75,13 @@ interface MemoryEntry {
 **契约常量**(单一真相源,工具校验与文件校验共用):
 - `MEMORY_TYPES = ['rules', 'lessons']`(不含 state/todo)
 - `DOMAINS = [21 个 domain id]`(与 concept.md §3 一一对应)
-- `TABLE_HEADER`(7 列表头)、`TABLE_SEPARATOR`(分隔行)
+- `TABLE_HEADER`(8 列表头:首列 `id` + 上述 7 字段)、`TABLE_SEPARATOR`(8 列分隔行)
 - 文件名正则:`/^\d{4}-\d{2}-\d{2}(?:\.[a-z0-9-]+)?\.(rules|lessons)\.remember\.(jsonl|md)$/`
 
 ## 6. 存储与渲染
 
-- **真相源 JSONL**:`remember` = 追加一行(校验 schema);`forget` = 删除匹配行;`lessons` 合并 = 替换行。所有写都改 `.remember.jsonl`。
-- **渲染投影 MD**:每次写 jsonl 后,用纯函数 `renderMd(entries)` 重新生成同名 `.remember.md`(7 列表格),再跑 `checkMarkdown(md)` 静态检查(列数一致、`|` 转义、表格闭合)。
+- **真相源 JSONL**:`remember` = 追加一行(校验 schema;`rules` 重复 `entry` 拒绝、`lessons` 单条 ≤300 字);`forget` = 删除匹配行;lessons 合并 = 替换该行(**无自动主题合并**,由 agent 按 `id` 改写条目,见 memory-review.md)。所有写都改 `.remember.jsonl`。
+- **渲染投影 MD**:每次写 jsonl 后,用纯函数 `renderMd(entries)` 重新生成同名 `.remember.md`(8 列表格:首列 `id` + 7 字段),再跑 `checkMarkdown(md)` 静态检查(列数一致、`|` 转义、表格闭合)。
 - MD 永不解析、只生成——写逻辑只碰 JSONL,避免手写 md 表格解析器的脆弱性。
 - **forget 跨文件定位(盲点修正)**:条目按命名(日期+分区)分散在多个文件里,不在「当天文件」。`forget` 因此**遍历全部可见的 `.remember.jsonl`**,对受影响的文件重写 jsonl + 重渲染 md,而非只改当天文件。
 - **空表语义(盲点修正)**:`forget` 删空某文件后,仍写出「表头 + 分隔行」的空表格(保留文件骨架),**不删除文件**——保持「.md 与 .jsonl 一一对应」的命名不变量。
@@ -90,19 +91,19 @@ interface MemoryEntry {
 这是全插件最稳、最不依赖 `v4-flash` 实时调用的部分,开发顺序上最先做。三个纯函数模块:
 
 **`schema.ts` — JSONL 逐行 schema 校验**
-- 用 schemastery 定义 `MemoryEntry` 的 schema(`type` ∈ rules/lessons、`domain` ∈ 21 枚举、`scope` 非空自由文本、`layer` ∈ global/user/project、`entry` 非空、`entryPoint`/`references` 缺省 `-`)。
+- 用 schemastery 定义 `MemoryEntry` 的 schema(`type` ∈ rules/lessons、`domain` ∈ 21 枚举、`scope` 非空自由文本、`layer` ∈ global/user/project、`entry` 非空、`entryPoint`/`references` 缺省 `-`、`id` 缺省时自动生成)。
 - 契约常量:`MEMORY_TYPES` / `DOMAINS` / `TABLE_HEADER` / `TABLE_SEPARATOR` / `FILE_NAME_RE`。
 - 导出 `parseEntry(line: string): MemoryEntry`(非法行抛带行号的清晰错误)与 `validateEntry(entry): MemoryEntry`。
 - schemastery 两坑照走:`Schema<T>` 断言 `as unknown as T`;常量显式标注 `: Schema<T>`。
 
 **`render.ts` — JSONL → Markdown 投影(纯函数)**
-- `renderMd(entries): string` 生成 7 列表格:表头 + 分隔行 + 每行一 entry。
+- `renderMd(entries): string` 生成 8 列表格(首列 `id` + 7 字段):表头 + 分隔行 + 每行一 entry。
 - 单元格内的 `|` 转义为 `\|`;`entry` 文本按列对齐的静态表格格式输出。
 - `renderSummary(entries): string` 生成 system prompt 注入用的「已知记忆摘要」(非整段,只列条目文本)。
 
 **`check.ts` — Markdown 静态检查**
 - `checkMarkdown(md): string[]` 返回错误列表(空 = 通过)。
-- 检查项:表头 7 列、分隔行 7 列、数据行每行列数与表头一致、无未闭合表格、`entry` 内 `|` 已转义。
+- 检查项:表头 8 列、分隔行 8 列、数据行每行列数与表头一致、无未闭合表格、单元格内 `|` 已转义。
 - 用于「写 jsonl 后重渲染 MD」的最终守卫——渲染产物不通过静态检查则拒绝写盘。
 
 ### 6.2 测试与验证
@@ -116,7 +117,7 @@ interface MemoryEntry {
 
 - 每节点 = 一个 `v4-flash` 模型调用器 + 它负责的记忆文本(≤ `maxNodeKb`,默认 600Kb)。
 - 一个节点可装载多个记忆文件:文件按「日期+分区+类型」分配到节点,直到累计接近容量上限。
-- 节点数 = `ceil(总记忆大小 / maxNodeKb)`。
+- 节点数 = `ceil(总记忆大小 / maxNodeKb)`(实现为贪心装箱近似:文件源累加到接近上限即封口;单个超容量源独占一个节点,允许该节点超容量)。
 
 ### 预热(warm-up)与 team 生命周期
 
@@ -124,6 +125,7 @@ interface MemoryEntry {
 - **生命周期**:`start`(组装 team)/ `stop`(释放 team)/ `restart`(重新组装)——经 slash command 控制;`warmupOnStart` 为真时插件启动自动预热。
 - 预热后、未 stop 时,recall 直接 fan-out,不再等待组装 / 重读磁盘。
 - **预热键与惰性语义(盲点修正)**:预热要读项目级记忆文件,而插件启动时没有 agent/cwd。故 team 按 **project root 分键缓存**;`warmupOnStart` 只预热用户级(无 cwd)team,项目级 team 在**首次 recall 时惰性预热**。`ensureTeam(cwd)` 命中缓存即复用,未命中才组装。
+- **实现取舍(纯逻辑注入)**:v4-flash 调用器(`recallFn` / `rerank`)在 recall 时经函数参数注入,而非预热时绑定到 team——`team.ts` 因此不 import cordis / dsh-llm,分区与聚合可在单测里无 API key 验证。可观察契约不变:预热后 recall 不重读磁盘、不重组装。
 
 ### 召回流程
 
@@ -151,6 +153,8 @@ interface MemoryEntry {
 | `/lmemory query <text>` | 人主动查询长期记忆(fan-out 同 recall) |
 | `/lmemory config get` / `set <key> <value>` | 读写配置项(见 §9) |
 
+> `/lmemory review`(质检,注入主会话)与 `/lmemory catalog rebuild`(重建 catalog)属独立扩展,见 [memory-review.md](memory-review.md) §5 / §3。
+
 命令 handler 收 `invocation.rawInput`,自行解析子命令;返回 `{kind:'success'|'error', text}`。命令是「人操作面」,工具是「模型操作面」,两者共享同一 team 与存储。
 
 ## 9. 配置项(存 `ctx.settings`,slash command 读写)
@@ -171,17 +175,19 @@ interface MemoryEntry {
 ```
 
 > 这是「设计起点的合理集」,开发时按需增删(召回模型、节点并发度等)。
+>
+> 扩展文档另增配置键(同样存 `ctx.settings`,经 `/lmemory config set` 读写):auto-extraction.md §7 增 `autoExtract` / `extractMode` / `extractInterval` / `signalWords` / `extractRulesPrompt` / `extractLessonsPrompt`;memory-review.md §7 增 `reviewModel`。
 
 ## 10. 验收标准(AC)
 
-1. `remember` 写一条记忆 → 追加到对应 `.remember.jsonl`,并生成同名 `.remember.md`(7 列,通过静态检查)。
+1. `remember` 写一条记忆 → 追加到对应 `.remember.jsonl`,并生成同名 `.remember.md`(8 列:首列 `id`,通过静态检查)。
 2. `recall` 经记忆节点 team 召回相关条目;预热后、未 stop 时不重读磁盘、不重组装。
 3. `forget` 删除 JSONL 行并重渲染 MD;`rules` 删除需确认。
 4. JSONL 每行 schema 校验:type 非法、domain 非法、列缺失 → 拒绝并报清晰错误。
 5. MD 渲染后通过 Markdown 静态检查(`|` 转义、列数一致)。
-6. `rules` 只增不减(重复 entry 拒绝);`lessons` 合并 ≤300 字。
+6. `rules` 只增不减(重复 entry 拒绝);`lessons` 单条 ≤300 字(自动主题合并不做,见 §6)。
 7. `/lmemory status` / `team start|stop|restart` / `config get|set` / `query <text>` 均可操作。
-8. `maxNodeKb` 可经 `/lmemory config set` 修改,节点分配随之重算(需 restart)。
+8. `maxNodeKb` 可经 `/lmemory config set` 修改;变更时自动释放已预热 team,下次 recall 按新容量重分区(无需手动 restart)。
 9. system prompt 注入已知记忆摘要(非整段历史)。
 10. **headless 验证**:第一次任务 `remember` 一条偏好 → 第二次任务 `recall` 能召回。
 

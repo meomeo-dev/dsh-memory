@@ -30,7 +30,7 @@ import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
 import { renderSummary } from './render.js'
 import { discoverEntries } from './memory-file.js'
-import { append, find, remove, removeByEntry, update } from './store.js'
+import { append, find, rebuild, remove, removeByEntry, update } from './store.js'
 import { recall as recallTeam } from './team.js'
 import type { NodeRecallFn, RerankFn } from './team.js'
 import {
@@ -452,6 +452,10 @@ async function handleCommand(
           content: [{ type: 'text', text: report }],
         }))
         return { kind: 'success', text: `review 完成,发现 ${findings.length} 处,报告已注入会话` }
+      }
+      case 'catalog': {
+        rebuild(cwd)
+        return { kind: 'success', text: 'catalog rebuilt from jsonl.' }
       }
       /* v8 ignore next 2 -- closed union backstop */
       default:

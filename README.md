@@ -53,4 +53,4 @@ dsh --profile demo
 
 ## 状态
 
-已实现主动记忆(remember / recall / forget)+ 质检(review)+ 自动提取(auto-extraction)。单元测试 106 个全绿(模型调用以 mock 注入);召回 / 质检 / 抽取需真实 `DEEPSEEK_API_KEY` 端到端验证,npm 发布待人工配置 Automation token 后经 release workflow 触发。
+已实现主动记忆(remember / recall / forget)+ 质检(review)+ 自动提取(auto-extraction)。单元测试 108 个全绿(模型调用以 mock 注入);召回 / 质检 / 抽取需真实 `DEEPSEEK_API_KEY` 端到端验证,npm 发布待人工配置 Automation token 后经 release workflow 触发。

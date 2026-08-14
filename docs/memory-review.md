@@ -65,9 +65,11 @@ interface MemoryEntry {
 ```
 
 - `file` 是相对本层 `memory/` 目录的路径,指向具体 `.remember.jsonl`。
-- **分层**:与记忆文件同层分布(design.md §4),每层一个 `catalog.json`。查询/操作时,按「就近覆盖」合并可见层的 catalog 定位 id 所在文件。
+- **分层**:与记忆文件同层分布(design.md §4),每层一个 `catalog.json`(各自独立,不做跨层合并)。查询/操作按「就近覆盖」合并可见层(内置 < 用户 < 项目,同级 `.dsh` > `.agents`)扫描定位,不读 catalog(见下方「定位方式」)。
 
-**维护(程序自动)**:每次写操作(`remember` / `update` / `delete`)改完 `.remember.jsonl` 后,同步更新对应层的 `catalog.json`(增 / 改 / 删条目)。这取代 design.md §6「forget 遍历全部文件」的盲点修正——`forget`/`delete` 改查 catalog 定位,不再全量扫描。
+**维护(程序自动)**:每次写操作(`remember` / `update` / `delete` / `forget`)改完 `.remember.jsonl` 后,同步更新对应层的 `catalog.json`(增 / 改 / 删条目,全量重写)。
+
+> **定位方式(实现决策)**:`find` / `update` / `remove` / `forget` 定位记忆时**扫描可见文件 + 惰性迁移**,不读 catalog——catalog 仍被写盘维护,但 store 不依赖它定位。这是对「改查 catalog 定位、不再全量扫描」字面目标的**有意偏离**:jsonl 是真相源,扫描 + 迁移是「总是正确」的路径,不会把 catalog 的滞后(手动编辑 jsonl 后未 rebuild)带进定位;catalog 的职责收缩为「派生索引 + rebuild 一键对齐」,不承担定位职责。因此 design.md §6「forget 遍历全部文件」的盲点修正仍保留,实现改为「扫描 + 迁移」而非「查 catalog」。
 
 **重建兜底**:`/lmemory catalog rebuild` 扫描所有可见 `.remember.jsonl`,重建全部 catalog(手动编辑 jsonl 后的一键对齐;不一致时以 jsonl 为准)。
 
@@ -121,14 +123,16 @@ ctx.commands.register({
   handler: async (invocation) => {
     // …解析子命令为 review…
     const report = await runReview(invocation.agent.session, { layer })   // v4-pro 质检
-    invocation.agent.followup({
-      source: { kind: 'memory-review' },        // 合成 source(非 human)
-      content: renderReport(report),             // 结构化缺陷清单,含 id + suggest
-    })
+    invocation.agent.followup(createUserMessage({
+      source: { kind: 'plugin', plugin: 'dsh-memory', form: 'notice', summary: `记忆质检:发现 ${report.length} 处缺陷` },
+      content: [{ type: 'text', text: renderReport(report) }],
+    }))
     return { kind: 'success', text: `review 完成,发现 ${report.length} 处,报告已注入会话` }
   },
 })
 ```
+
+> **合成 source(实现决策)**:示例里的 `{ kind: 'memory-review' }` 未采用——`MessageSourceMap` 是 merge-extensible 的 sum type,新增 kind 需 declaration merging;实现改用现成的 `{ kind: 'plugin', plugin: 'dsh-memory', form: 'notice', summary }`(插件合成消息的标准 source)。`form: 'notice'` + `summary` 让注入的报告在转录里以折叠行呈现。
 
 注入的报告以「缺陷清单 + 每条记忆的 id + 建议动作」形式进入模型,主 agent 据此自主调 `memory-update` / `memory-delete` 工具修复(见 §6),修复后回写记忆文件 + catalog。
 
@@ -140,7 +144,7 @@ ctx.commands.register({
 
 | 工具 | 参数 | 行为 |
 |---|---|---|
-| `memory-find` | `id`(精确查一条)/ `type?` `domain?` `scope?`(影响范围)/ `layer?`(过滤列多条) | 查 catalog + 对应文件,返回记忆条目(含 id / file / 完整字段) |
+| `memory-find` | `id`(精确查一条)/ `type?` `domain?` `scope?`(影响范围)/ `layer?`(过滤列多条) | 扫描可见文件按 id/条件过滤,返回记忆条目(含 id / file / 完整字段);catalog 不参与定位(见 §3) |
 | `memory-update` | `id`(必填)+ 要改的字段(`entry?` `domain?` `scope?` `entryPoint?` `references?`) | 按 id 定位文件,改写该行 jsonl → 重渲染 MD → 更新 catalog;`id` 与 `layer` 不可改 |
 | `memory-delete` | `id`(必填)+ `confirm?` | 按 id 定位文件,删除该行 → 重渲染 MD → 更新 catalog;`rules` 删除须 `confirm: true` |
 
@@ -157,13 +161,13 @@ ctx.commands.register({
 | 配置项 | 默认 | 含义 |
 |---|---|---|
 | `reviewModel` | `deepseek-v4-pro` | 质检模式所用的模型(召回仍用 `model`,见 design.md §9) |
-| `reviewLayer` | `all` | review 默认质检范围(按落点层):`all` / `global` / `user` / `project` |
-| `catalogVersion` | `1` | catalog 文件格式版本(格式变更时递增) |
+
+> `reviewLayer` 与 `catalogVersion` 不设为用户配置:`reviewLayer`(review 默认质检范围)由 `/lmemory review [layer|domain]` 的调用参数限定(§5),不做持久化默认;`catalogVersion` 是写死在 store 的格式常量(`CATALOG_VERSION = 1`),格式变更时由代码递增,不开放覆盖。
 
 ## 8. 验收标准(AC)
 
 1. `remember` 写新记忆 → 生成唯一 id,写 jsonl + 重渲染 MD(id 列)+ 更新 catalog。
-2. `memory-find --id <id>` 查 catalog 定位文件,返回该条完整记忆(含所在文件)。
+2. `memory-find --id <id>` 定位文件,返回该条完整记忆(含所在文件);catalog 不参与定位(见 §3)。
 3. `memory-update --id <id> --entry …` 改该行 jsonl → 重渲染 MD → 更新 catalog;id 不变。
 4. `memory-delete --id <id>` 删该行 → 重渲染 MD → 更新 catalog;`rules` 删除需确认。
 5. `/lmemory review` 触发 v4-pro 质检 → 报告经 `agent.followup` 注入主会话 → 主 agent 能按报告 id 调工具修复。
