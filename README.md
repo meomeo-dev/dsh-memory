@@ -21,7 +21,7 @@ dsh --profile demo
 模型在会话里主动调用工具:
 
 - `remember` —— 写入一条记忆(`type` / `domain` / `scope` / `layer` / `entry` + 可选 `entryPoint` / `references`)
-- `recall` —— 经多 `deepseek-v4-flash` 记忆节点 team 召回相关条目
+- `recall` —— 经多 `deepseek-v4-flash` 记忆节点 team 召回相关条目,每条返回完整字段(`id` / `type` / `domain` / `scope` / `layer` / `entry` / `entryPoint` / `references` / `file`,供溯源)
 - `forget` —— 按 `entry` 精确匹配删除(`rules` 删除需 `confirm: true`)
 - `memory-find` —— 按 `id` 或 `type` / `domain` / `scope` / `layer` 过滤查找
 - `memory-update` —— 按 `id` 改写可改字段(`entry` / `domain` / `scope` / `entryPoint` / `references`)
@@ -29,7 +29,10 @@ dsh --profile demo
 
 人可操作 `/lmemory` 命令:
 
+- `/lmemory help [command]` —— 全部命令一览;带子命令名时查看该命令的详细帮助
 - `/lmemory status` —— 查看 team 节点数 / 每节点状态
+- `/lmemory stats` —— 记忆统计:条目数(rules/lessons)、layer / domain 分布、文件大小、catalog 条目数(纯文件读,不发模型调用)
+- `/lmemory usage` —— token 用量:预热 team 与 system prompt 摘要的上下文成本估算 + 本进程 recall/extract/review 的 LLM 调用消耗(输入/输出/缓存读)
 - `/lmemory team start|stop|restart` —— 组装 / 释放 / 重新组装 team
 - `/lmemory query <text>` —— 人主动查询长期记忆
 - `/lmemory review [layer|domain]` —— 用 `deepseek-v4-pro` 质检记忆,发现矛盾/重复/过时/背离,报告注入主会话

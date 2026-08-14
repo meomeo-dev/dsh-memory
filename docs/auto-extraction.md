@@ -221,13 +221,13 @@ dsh 的 session 暴露 `deriveMessages(): Message[]`(`packages/core/session/src/
 **rules 抽取器**(默认提示词,可经配置覆盖):
 
 ```
-你是「用户偏好(rules)」抽取器。给定一段对话,找出用户明确表达或隐含的长期偏好、习惯、格式、技术栈限制、共识、约束。只输出值得长期记住的条目,一行一条,格式为「domain|scope|entry」,domain 从已知领域枚举中选最贴切的一个(如 DurablePrefs、CodeFacts、Style),scope 填这条记忆影响的具体子系统 / 模块(自由文本,如「全项目」「Web UI」);没有值得记的输出空。禁止记录:操作流水账、思考过程、具体代码实现、密钥或凭据、易变的进度/待办。
+你是「用户偏好(rules)」抽取器。给定一段对话,找出用户明确表达或隐含的长期偏好、习惯、格式、技术栈限制、共识、约束。只输出值得长期记住的条目,一行一条,格式为「domain|scope|entry|entryPoint|references」,domain 从已知领域枚举中选最贴切的一个(如 DurablePrefs、CodeFacts、Style),scope 填这条记忆影响的具体子系统 / 模块(自由文本,如「全项目」「Web UI」),entry 填一句话条目(不含竖线 |),entryPoint 填这条记忆的来源文件路径(对话中出现的真实路径,如 src/index.ts),references 填相关参考文件路径;entryPoint / references 没有对应路径时填 -。没有值得记的输出空。禁止记录:操作流水账、思考过程、具体代码实现、密钥或凭据、易变的进度/待办。
 ```
 
 **lessons 抽取器**(默认提示词,可经配置覆盖):
 
 ```
-你是「经验教训(lessons)」抽取器。给定一段对话,找出踩过的坑、环境限制、API 变更、bug 根因结论。只输出值得长期记住的条目,一行一条,格式为「domain|scope|entry」,domain 从已知领域枚举中选最贴切的一个(如 PastFixes、PromotedPitfalls、CodeFacts),scope 填这条记忆影响的具体子系统 / 模块(自由文本,如「样本库」「检测评分」),单条不超过 300 字;没有值得记的输出空。禁止记录:操作流水账、思考过程、具体代码实现、密钥或凭据。
+你是「经验教训(lessons)」抽取器。给定一段对话,找出踩过的坑、环境限制、API 变更、bug 根因结论。只输出值得长期记住的条目,一行一条,格式为「domain|scope|entry|entryPoint|references」,domain 从已知领域枚举中选最贴切的一个(如 PastFixes、PromotedPitfalls、CodeFacts),scope 填这条记忆影响的具体子系统 / 模块(自由文本,如「样本库」「检测评分」),entry 填一句话条目(不含竖线 |),单条不超过 300 字,entryPoint 填这条记忆的来源文件路径(对话中出现的真实路径,如 src/index.ts),references 填相关参考文件路径;entryPoint / references 没有对应路径时填 -。没有值得记的输出空。禁止记录:操作流水账、思考过程、具体代码实现、密钥或凭据。
 ```
 
 ### 5.4 成本分级:抽取 / 召回用 flash,review 才用 pro

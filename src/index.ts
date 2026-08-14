@@ -30,7 +30,8 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
 import { renderSummary } from './render.js'
-import { discoverEntries } from './memory-file.js'
+import { discoverEntries, resolveRecalled } from './memory-file.js'
+import type { RecalledEntry } from './memory-file.js'
 import { append, find, rebuild, remove, removeByEntry, update } from './store.js'
 import { recall as recallTeam } from './team.js'
 import type { NodeRecallFn, RerankFn } from './team.js'
@@ -66,7 +67,9 @@ import {
   parseSignalWords,
 } from './extract.js'
 import type { ExtractFn, TranscriptMessage } from './extract.js'
-import { USAGE, parseLmemoryCommand } from './command.js'
+import { computeStats, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.js'
+import type { UsageCounter } from './stats.js'
+import { COMMAND_HELPS, USAGE, parseLmemoryCommand, renderHelp } from './command.js'
 
 /** Stable Cordis plugin name. */
 export const name = 'dsh-memory'
@@ -95,14 +98,19 @@ const SCHEMA: z<MemoryConfig> = z.object({
 })
 
 /** 召回节点 system prompt(固定,非配置项)。 */
-const NODE_RECALL_SYSTEM = '你是长期记忆召回节点。给定一组记忆条目(每条一行,格式 `[类型|领域] 条目文本`)与一个查询,仅返回与查询相关的条目的「条目文本」部分,一行一条,照抄原文,不返回任何解释。无相关条目时返回空。'
+const NODE_RECALL_SYSTEM = '你是长期记忆召回节点。给定一组记忆条目(每条一行,格式 `[id|type|domain|scope] 条目文本`)与一个查询,仅返回与查询相关的条目的**整行**(含方括号前缀),一行一条,照抄原文,不返回任何解释。无相关条目时返回空。'
 
-/** 运行时可变状态:已预热 team + 当前配置 + 退火冷却计数器。 */
+/** LLM 调用消耗的职责分类(与 stats.ts 的 UsageCounter 对应)。 */
+type UsageLabel = 'recall' | 'extract' | 'review'
+
+/** 运行时可变状态:已预热 team + 当前配置 + 退火冷却计数器 + LLM 调用消耗。 */
 interface Runtime {
   readonly state: RuntimeState
   config: MemoryConfig
   /** 会话 id → 距上次抽取的 turn 数(形态 3 退火冷却,按会话独立)。 */
   readonly annealing: Map<string, number>
+  /** 职责分类 → LLM 调用消耗累计(供 `/lmemory usage`)。 */
+  readonly usage: Map<UsageLabel, UsageCounter>
 }
 
 /** remember 工具的规范化输出。 */
@@ -115,9 +123,9 @@ interface RememberValue {
   mdPath: string
 }
 
-/** recall 工具的规范化输出。 */
+/** recall 工具的规范化输出(完整条目投影,与 memory-find 同构)。 */
 interface RecallValue {
-  entries: string[]
+  entries: RecalledEntry[]
 }
 
 /** forget 工具的规范化输出。 */
@@ -126,22 +134,9 @@ interface ForgetValue {
   entry: string
 }
 
-/** memory-find 工具命中的一条记忆的规范化输出。 */
-interface FoundMemoryValue {
-  id: string
-  file: string
-  type: string
-  domain: string
-  scope: string
-  layer: string
-  entry: string
-  entryPoint: string
-  references: string
-}
-
 /** memory-find 工具的规范化输出。 */
 interface FindValue {
-  entries: FoundMemoryValue[]
+  entries: RecalledEntry[]
 }
 
 /** memory-update 工具的规范化输出。 */
@@ -168,19 +163,22 @@ function parseLines(text: string): string[] {
 }
 
 /**
- * 发一次轻量模型调用(召回用 v4-flash、质检用 v4-pro),返回聚合文本。
+ * 发一次轻量模型调用(召回用 v4-flash、质检用 v4-pro),返回聚合文本,并把
+ * usage 累计进对应职责分类的计数器(供 `/lmemory usage`)。
  * @param ctx - 插件上下文。
- * @param config - 当前配置(取 provider)。
+ * @param runtime - 运行时状态(取配置 + usage 累计)。
  * @param system - system prompt 文本。
  * @param prompt - 用户消息文本。
+ * @param label - 职责分类(recall / extract / review)。
  * @param model - 覆盖模型 id;缺省用 `config.model`。
  */
 async function callFlash(
   ctx: Context,
-  config: MemoryConfig,
+  runtime: Runtime,
   system: string,
   prompt: string,
-  model = config.model,
+  label: UsageLabel,
+  model = runtime.config.model,
 ): Promise<string> {
   const message = createUserMessage({
     source: { kind: 'plugin', plugin: 'dsh-memory' },
@@ -188,13 +186,15 @@ async function callFlash(
   })
   let text = ''
   for await (const chunk of ctx.llm.stream({
-    provider: config.provider,
+    provider: runtime.config.provider,
     model,
     system,
     messages: [message],
   })) {
     if (chunk.type === 'text-delta') text += chunk.text
-    else if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
+    else if (chunk.type === 'usage') {
+      runtime.usage.set(label, recordUsage(runtime.usage.get(label) ?? EMPTY_USAGE, chunk.usage))
+    } else if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
       throw new Error(`memory recall call failed: ${chunk.reason.failure.message}`)
     }
   }
@@ -206,24 +206,26 @@ function warnNode(ctx: Context, label: string, error: unknown): void {
   ctx.logger.warn(`dsh-memory: ${label} failed: ${error instanceof Error ? error.message : String(error)}`)
 }
 
-/** 执行一次召回:预热 team → fan-out → 聚合。 */
-async function doRecall(ctx: Context, runtime: Runtime, cwd: string | undefined, query: string): Promise<string[]> {
+/** 执行一次召回:预热 team → fan-out → 聚合(整行)→ 按 id 逆查补全字段。 */
+async function doRecall(ctx: Context, runtime: Runtime, cwd: string | undefined, query: string): Promise<RecalledEntry[]> {
   const team = ensureTeam(runtime.state, cwd, runtime.config)
   const nodeFn: NodeRecallFn = async (node, q) => {
-    const response = await callFlash(ctx, runtime.config, NODE_RECALL_SYSTEM, `记忆条目:\n${node.text}\n\n查询:${q}`)
+    const response = await callFlash(ctx, runtime, NODE_RECALL_SYSTEM, `记忆条目:\n${node.text}\n\n查询:${q}`, 'recall')
     return parseLines(response)
   }
   const rerankFn: RerankFn = async (q, candidates) => {
     const response = await callFlash(
       ctx,
-      runtime.config,
+      runtime,
       runtime.config.rerankPrompt,
       `查询:${q}\n\n候选条目:\n${candidates.map((candidate, index) => `${index + 1}. ${candidate}`).join('\n')}`,
+      'recall',
     )
     const ordered = parseLines(response)
     return ordered.length > 0 ? ordered : candidates
   }
-  return recallTeam(team, query, nodeFn, rerankFn, runtime.config.recallTopK, (nodeId, error) => warnNode(ctx, `recall node ${nodeId}`, error))
+  const lines = await recallTeam(team, query, nodeFn, rerankFn, runtime.config.recallTopK, (nodeId, error) => warnNode(ctx, `recall node ${nodeId}`, error))
+  return resolveRecalled(cwd, lines)
 }
 
 /** 质检节点 system prompt(固定,非配置项;只输出 JSON 数组)。 */
@@ -255,12 +257,12 @@ async function doReview(
   const knownIds = new Set(entries.map(entry => entry.id))
 
   const nodeReviewFn: NodeReviewFn = async (node) => {
-    const response = await callFlash(ctx, runtime.config, NODE_REVIEW_SYSTEM, `记忆条目:\n${node.text}`, runtime.config.reviewModel)
+    const response = await callFlash(ctx, runtime, NODE_REVIEW_SYSTEM, `记忆条目:\n${node.text}`, 'review', runtime.config.reviewModel)
     return parseFindings(response, knownIds)
   }
   const crossNodeReviewFn: CrossNodeReviewFn = async (allEntries) => {
     const text = allEntries.map(reviewEntryLine).join('\n')
-    const response = await callFlash(ctx, runtime.config, CROSS_NODE_REVIEW_SYSTEM, `记忆条目:\n${text}`, runtime.config.reviewModel)
+    const response = await callFlash(ctx, runtime, CROSS_NODE_REVIEW_SYSTEM, `记忆条目:\n${text}`, 'review', runtime.config.reviewModel)
     return parseFindings(response, knownIds)
   }
   return runReview(team, entries, nodeReviewFn, crossNodeReviewFn, (nodeId, error) => warnNode(ctx, `review ${nodeId}`, error))
@@ -307,16 +309,24 @@ async function runExtraction(ctx: Context, runtime: Runtime, session: Session): 
   const cwd = session.header.cwd
   if (cwd === undefined) return
   const transcript = buildTranscript(toTranscript(session.deriveMessages()))
-  const rulesFn: ExtractFn = text => callFlash(ctx, runtime.config, runtime.config.extractRulesPrompt, text)
-  const lessonsFn: ExtractFn = text => callFlash(ctx, runtime.config, runtime.config.extractLessonsPrompt, text)
+  const rulesFn: ExtractFn = text => callFlash(ctx, runtime, runtime.config.extractRulesPrompt, text, 'extract')
+  const lessonsFn: ExtractFn = text => callFlash(ctx, runtime, runtime.config.extractLessonsPrompt, text, 'extract')
   const result = await extractBoth(transcript, rulesFn, lessonsFn, (type, error) => warnNode(ctx, `extract ${type}`, error))
   const layer = deriveLayer(cwd)
   const existingLessons = new Set(find(cwd, { type: 'lessons' }).map(found => found.entry.entry))
   for (const candidate of result.rules) {
-    append(cwd, { type: 'rules', domain: candidate.domain, scope: candidate.scope, layer, entry: candidate.entry })
+    append(cwd, {
+      type: 'rules', domain: candidate.domain, scope: candidate.scope, layer, entry: candidate.entry,
+      ...(candidate.entryPoint === undefined ? {} : { entryPoint: candidate.entryPoint }),
+      ...(candidate.references === undefined ? {} : { references: candidate.references }),
+    })
   }
   for (const candidate of filterNovel(result.lessons, existingLessons)) {
-    append(cwd, { type: 'lessons', domain: candidate.domain, scope: candidate.scope, layer, entry: candidate.entry })
+    append(cwd, {
+      type: 'lessons', domain: candidate.domain, scope: candidate.scope, layer, entry: candidate.entry,
+      ...(candidate.entryPoint === undefined ? {} : { entryPoint: candidate.entryPoint }),
+      ...(candidate.references === undefined ? {} : { references: candidate.references }),
+    })
   }
 }
 
@@ -397,10 +407,20 @@ function applyConfig(runtime: Runtime, next: MemoryConfig): void {
   if (next.maxNodeKb !== prev.maxNodeKb) stopTeams(runtime.state)
 }
 
+/** 渲染一条召回/查找结果为单行(含 id、分类、落点、溯源路径;`-` 字段省略)。 */
+function renderRecalledLine(found: RecalledEntry): string {
+  const trace = [
+    found.file,
+    ...(found.entryPoint !== '-' ? [`entryPoint: ${found.entryPoint}`] : []),
+    ...(found.references !== '-' ? [`references: ${found.references}`] : []),
+  ].join(' · ')
+  return `[${found.id}] (${found.type}/${found.domain}, ${found.layer}) ${found.entry} — ${trace}`
+}
+
 /** 渲染召回条目为多行编号文本。 */
-function renderEntries(entries: readonly string[]): string {
+function renderEntries(entries: readonly RecalledEntry[]): string {
   if (entries.length === 0) return 'No relevant memory entries.'
-  return entries.map((entry, index) => `${index + 1}. ${entry}`).join('\n')
+  return entries.map((entry, index) => `${index + 1}. ${renderRecalledLine(entry)}`).join('\n')
 }
 
 /** 渲染 team 状态为可读文本。 */
@@ -409,6 +429,54 @@ function renderStatus(statuses: readonly TeamStatus[], config: MemoryConfig): st
   const lines = statuses.map(status =>
     `  ${status.root === '' ? '(no project)' : status.root}: ${status.nodes} node(s)`)
   return `Memory team (maxNodeKb=${config.maxNodeKb}):\n${lines.join('\n')}`
+}
+
+/** 把字节数渲染为人类可读的大小(保留一位小数,自适应 Kb/Mb)。 */
+function renderBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Kb`
+  return `${(bytes / 1024 / 1024).toFixed(1)} Mb`
+}
+
+/** 渲染记忆统计(`/lmemory stats`)。 */
+function renderStats(cwd: string | undefined, config: MemoryConfig): string {
+  const stats = computeStats(cwd)
+  const domains = [...stats.byDomain.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+  const domainLines = domains.length === 0
+    ? ['(none)']
+    : domains.map(([domain, count]) => `    ${domain}: ${count}`)
+  return [
+    `Memory stats (maxNodeKb=${config.maxNodeKb}):`,
+    `  entries: ${stats.total} (rules: ${stats.byType.rules}, lessons: ${stats.byType.lessons})`,
+    `  layers: global: ${stats.byLayer.global}, user: ${stats.byLayer.user}, project: ${stats.byLayer.project}`,
+    '  domains:',
+    ...domainLines,
+    `  files: ${stats.files} (jsonl ${renderBytes(stats.jsonlBytes)}, md ${renderBytes(stats.mdBytes)})`,
+    `  catalog entries: ${stats.catalogEntries}`,
+  ].join('\n')
+}
+
+/** 渲染 token 用量(`/lmemory usage`):静态上下文成本估算 + 动态 LLM 调用消耗。 */
+function renderUsage(runtime: Runtime, cwd: string | undefined): string {
+  let nodeChars = 0
+  let nodeCount = 0
+  for (const team of runtime.state.teams.values()) {
+    nodeCount += team.nodes.length
+    for (const node of team.nodes) nodeChars += node.text.length
+  }
+  const summaryChars = renderSummary(discoverEntries(cwd)).length
+  const labels: readonly UsageLabel[] = ['recall', 'extract', 'review']
+  const callLines = labels.map((label) => {
+    const counter = runtime.usage.get(label) ?? EMPTY_USAGE
+    return `    ${label}: ${counter.calls} call(s) — input ${counter.inputTokens.toLocaleString()} / output ${counter.outputTokens.toLocaleString()} / cacheRead ${counter.cacheReadTokens.toLocaleString()}`
+  })
+  return [
+    'Memory token usage:',
+    `  warm team: ${nodeCount} node(s), ${renderBytes(nodeChars)} text (~${estimateTokens(nodeChars).toLocaleString()} tokens est.)`,
+    `  system-prompt summary: ${renderBytes(summaryChars)} (~${estimateTokens(summaryChars).toLocaleString()} tokens est.)`,
+    '  LLM calls (this process):',
+    ...callLines,
+  ].join('\n')
 }
 
 /** 由配置对象渲染一行/全部配置。 */
@@ -453,9 +521,16 @@ async function handleCommand(
   try {
     switch (command.kind) {
       case 'help':
-        return { kind: 'success', text: USAGE }
+        if (command.topic !== undefined && !COMMAND_HELPS.has(command.topic)) {
+          return { kind: 'error', text: renderHelp(command.topic) }
+        }
+        return { kind: 'success', text: renderHelp(command.topic) }
       case 'status':
         return { kind: 'success', text: renderStatus(teamStatus(runtime.state), runtime.config) }
+      case 'stats':
+        return { kind: 'success', text: renderStats(cwd, runtime.config) }
+      case 'usage':
+        return { kind: 'success', text: renderUsage(runtime, cwd) }
       case 'team': {
         if (command.action === 'start') {
           ensureTeam(runtime.state, cwd, runtime.config)
@@ -509,7 +584,7 @@ async function handleCommand(
 const REMEMBER_DESCRIPTION = 'Write one long-term memory entry. Only record rules (durable preferences, constraints, consensus) or lessons (past pitfalls, API changes); never log the step-by-step transcript, reasoning process, code implementation, or credentials. Provide type, domain, scope (impacted subsystem/module, free text), layer (storage layer), and the one-sentence entry; entryPoint and references default to "-".'
 
 /** recall 工具:fan-out 到记忆节点 team → 聚合返回相关条目。 */
-const RECALL_DESCRIPTION = 'Recall relevant long-term memory entries for a query by fanning out to the warm memory-node team and aggregating the deduplicated, reranked results.'
+const RECALL_DESCRIPTION = 'Recall relevant long-term memory entries for a query by fanning out to the warm memory-node team and aggregating the deduplicated, reranked results. Each returned entry carries its full fields (id, type, domain, scope, layer, entry) plus the containing file, entryPoint, and references for traceability.'
 
 /** forget 工具:精确匹配删除;rules 删除需 confirm:true。 */
 const FORGET_DESCRIPTION = 'Delete a long-term memory entry by exact entry text. Deleting a "rules" entry requires confirm: true because rules are append-only.'
@@ -596,7 +671,25 @@ function registerTools(ctx: Context, runtime: Runtime): void {
         type: 'object',
         additionalProperties: false,
         properties: {
-          entries: { type: 'array', items: { type: 'string' }, required: true },
+          entries: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string', required: true },
+                file: { type: 'string', required: true },
+                type: { type: 'string', required: true },
+                domain: { type: 'string', required: true },
+                scope: { type: 'string', required: true },
+                layer: { type: 'string', required: true },
+                entry: { type: 'string', required: true },
+                entryPoint: { type: 'string', required: true },
+                references: { type: 'string', required: true },
+              },
+            },
+          },
         },
       },
       render: (_args, value) => {
@@ -685,8 +778,7 @@ function registerTools(ctx: Context, runtime: Runtime): void {
       render: (_args, value) => {
         const v = value as FindValue
         if (v.entries.length === 0) return [{ type: 'text', text: 'No matching memory entries.' }]
-        const lines = v.entries.map((found, index) =>
-          `${index + 1}. [${found.id}] (${found.type}/${found.domain}, ${found.layer}) ${found.entry} — ${found.file}`)
+        const lines = v.entries.map((found, index) => `${index + 1}. ${renderRecalledLine(found)}`)
         return [{ type: 'text', text: lines.join('\n') }]
       },
     },
@@ -794,7 +886,7 @@ function registerTools(ctx: Context, runtime: Runtime): void {
  * @param ctx - Cordis 上下文。
  */
 export function apply(ctx: Context): void {
-  const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG }, annealing: new Map() }
+  const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG }, annealing: new Map(), usage: new Map() }
 
   // order 10:persona(0)之后、工具指导(100–199)之前,注入已知记忆摘要。
   ctx.systemPrompt.section({
@@ -817,8 +909,8 @@ export function apply(ctx: Context): void {
 
     ctx.commands.register({
       name: 'lmemory',
-      description: 'manage long-term memory (status / team / query / config / review)',
-      input: { hint: 'status | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain]' },
+      description: 'manage long-term memory (status / stats / usage / team / query / config / review)',
+      input: { hint: 'status | stats | usage | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | help [command]' },
       handler: invocation => handleCommand(ctx, runtime, scope, invocation),
     })
   })

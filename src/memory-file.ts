@@ -19,6 +19,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readJsonlMigrating } from './migrate.js'
 import type { MemoryEntry } from './schema.js'
+import { parseRecallLine } from './team.js'
 
 /** 内置记忆目录(包内 `memory/`);无内容时不存在,发现时跳过。 */
 const BUILTIN_MEMORY_DIR = fileURLToPath(new URL('../memory', import.meta.url))
@@ -142,4 +143,69 @@ export function discoverFiles(cwd?: string): MemoryFile[] {
 /** 发现给定 cwd 可见的全部记忆条目(按文件排序后展平)。 */
 export function discoverEntries(cwd?: string): MemoryEntry[] {
   return discoverFiles(cwd).flatMap(file => [...file.entries])
+}
+
+/** 召回结果的一条完整投影:条目全部字段 + 所在文件。 */
+export interface RecalledEntry {
+  /** 记忆 id;逆查失败时降级为 `-`。 */
+  readonly id: string
+  /** 所在 `.remember.jsonl` 文件名;逆查失败时降级为 `-`。 */
+  readonly file: string
+  readonly type: string
+  readonly domain: string
+  readonly scope: string
+  readonly layer: string
+  readonly entry: string
+  readonly entryPoint: string
+  readonly references: string
+}
+
+/** 逆查失败的降级行(行内可解析的字段保留,真相源字段以 `-` 占位)。 */
+function degradedEntry(line: ReturnType<typeof parseRecallLine>): RecalledEntry {
+  return {
+    id: line.id ?? '-',
+    file: '-',
+    type: line.type ?? '-',
+    domain: line.domain ?? '-',
+    scope: line.scope ?? '-',
+    layer: '-',
+    entry: line.entry,
+    entryPoint: '-',
+    references: '-',
+  }
+}
+
+/**
+ * 把召回返回的整行(格式见 render.entryLine)按 id 逆查真相源,补全全部字段。
+ *
+ * 召回在节点文本(索引)上做,`layer` / `entryPoint` / `references` 只在真相源
+ * (jsonl)里;逆查 = 索引 → 真相源的回填。id 唯一,命中即完整字段;模型未照抄
+ * 整行(id 缺失/伪造)时降级为行内字段 + `-` 占位,不丢结果。
+ * @param cwd - 当前工作目录(与召回时一致)。
+ * @param lines - 召回/重排序输出的整行列表。
+ * @returns 完整条目投影(与 lines 同序)。
+ */
+export function resolveRecalled(cwd: string | undefined, lines: readonly string[]): RecalledEntry[] {
+  const byId = new Map<string, { entry: MemoryEntry; file: string }>()
+  for (const file of discoverFiles(cwd)) {
+    for (const entry of file.entries) {
+      byId.set(entry.id, { entry, file: file.jsonlPath.split(/[\\/]/).pop()! })
+    }
+  }
+  return lines.map((line) => {
+    const parsed = parseRecallLine(line)
+    const hit = parsed.id === undefined ? undefined : byId.get(parsed.id)
+    if (hit === undefined) return degradedEntry(parsed)
+    return {
+      id: hit.entry.id,
+      file: hit.file,
+      type: hit.entry.type,
+      domain: hit.entry.domain,
+      scope: hit.entry.scope,
+      layer: hit.entry.layer,
+      entry: hit.entry.entry,
+      entryPoint: hit.entry.entryPoint,
+      references: hit.entry.references,
+    }
+  })
 }

@@ -36,6 +36,10 @@ export interface ExtractedCandidate {
   readonly scope: string
   /** 一句话条目文本。 */
   readonly entry: string
+  /** 关联入口文件路径(对话中出现的真实路径);无则缺省。 */
+  readonly entryPoint?: string
+  /** 关联参考文件路径;无则缺省。 */
+  readonly references?: string
 }
 
 /** 一次抽取的结果:两类记忆的候选条目。 */
@@ -70,10 +74,12 @@ function isDomain(value: string): value is DomainId {
 /**
  * 解析一个抽取节点的原始输出为候选条目(容错,非法行丢弃,不抛)。
  *
- * 协议(docs/auto-extraction.md §5):一行一条,格式 `domain|scope|entry`,domain 从
- * 已知领域枚举选最贴切的一个,scope 填影响的具体子系统 / 模块(自由文本),entry 填
- * 一句话条目;空输出 = 无记忆。domain 非法、scope / entry 空白、lessons 单条超
- * 300 字的行被丢弃;同批次内按 entry 精确去重(保持首次出现顺序)。
+ * 协议(docs/auto-extraction.md §5):一行一条,格式
+ * `domain|scope|entry|entryPoint|references`,后两个字段可选、无对应路径时填 `-`
+ * (归一化为缺省)。domain 从已知领域枚举选最贴切的一个,scope 填影响的具体
+ * 子系统 / 模块(自由文本),entry 填一句话条目(**不含 `|`**);空输出 = 无记忆。
+ * domain 非法、scope / entry 空白、lessons 单条超 300 字的行被丢弃;同批次内按
+ * entry 精确去重(保持首次出现顺序)。
  * @param text - 模型输出的原始文本。
  * @param type - 该节点负责的记忆类型(用于校验 lessons 长度上限)。
  * @returns 归一化、去重后的候选条目。
@@ -84,19 +90,19 @@ export function parseExtraction(text: string, type: MemoryType): ExtractedCandid
   for (const raw of text.split('\n')) {
     const line = raw.trim()
     if (line.length === 0) continue
-    const firstSep = line.indexOf('|')
-    if (firstSep <= 0) continue
-    const domain = line.slice(0, firstSep).trim()
-    const rest = line.slice(firstSep + 1)
-    const secondSep = rest.indexOf('|')
-    // entry 允许含 `|`(取第二个分隔符之后的全部文本);scope 取中间一段。
-    const scope = (secondSep < 0 ? rest : rest.slice(0, secondSep)).trim()
-    const entry = (secondSep < 0 ? '' : rest.slice(secondSep + 1)).trim()
-    if (!isDomain(domain) || scope.length === 0 || entry.length === 0) continue
+    const segments = line.split('|').map(segment => segment.trim())
+    const [domain, scope, entry, entryPointRaw, referencesRaw] = segments
+    if (domain === undefined || domain.length === 0 || !isDomain(domain)) continue
+    if (scope === undefined || scope.length === 0 || entry === undefined || entry.length === 0) continue
     if (type === 'lessons' && entry.length > MAX_LESSON_CHARS) continue
     if (seen.has(entry)) continue
     seen.add(entry)
-    result.push({ type, domain, scope, entry })
+    // `-` / 空白 / 超出的第 6+ 段都归一化为缺省(路径不会含 `|`;容错丢弃多余段)。
+    const normalize = (value: string | undefined): string | undefined =>
+      value === undefined || value.length === 0 || value === '-' ? undefined : value
+    const entryPoint = normalize(entryPointRaw)
+    const references = normalize(referencesRaw)
+    result.push({ type, domain, scope, entry, ...(entryPoint === undefined ? {} : { entryPoint }), ...(references === undefined ? {} : { references }) })
   }
   return result
 }

@@ -129,8 +129,9 @@ interface MemoryEntry {
 
 ### 召回流程
 
-1. **fan-out**:recall 把 query 并发派给 team 的每个节点;每节点在其记忆文本上挑出相关条目,返回候选项。
-2. **聚合(aggregate)**:汇总候选 → 去重(按 entry 精确匹配)→ 按相关度重排序(`rerankPrompt` 可配)→ 截断到 `recallTopK` → 返回。
+1. **fan-out**:recall 把 query 并发派给 team 的每个节点;每节点在其记忆文本上挑出相关条目,返回候选项。节点文本每行带 id(格式 `[id|type|domain|scope] entry`,与 review 共用 render.entryLine)。
+2. **聚合(aggregate)**:汇总候选 → 去重(按 **id** 精确匹配,模型改写文本也不影响去重;纯文本行降级按整行)→ 按相关度重排序(`rerankPrompt` 可配,要求照抄整行)→ 截断到 `recallTopK`。
+3. **逆查补全(resolve)**:聚合结果按 id 从真相源(jsonl)逆查,补全 `layer` / `entryPoint` / `references` / `file` 等索引里没有的字段——召回在「索引」(节点文本)上做,溯源字段回填自「真相源」。id 缺失/伪造时降级为行内字段 + `-` 占位,不丢结果。
 
 ## 8. 工具 + 命令设计
 
@@ -148,7 +149,10 @@ interface MemoryEntry {
 
 | 子命令 | 行为 |
 |---|---|
+| `/lmemory help [command]` | 全部命令一览;带子命令名时查看该命令的详细帮助 |
 | `/lmemory status` | 查看记忆节点 team 状态(节点数、每节点大小、预热状态) |
+| `/lmemory stats` | 记忆统计:条目数 / layer / domain 分布、文件字节、catalog 条目数(纯文件读) |
+| `/lmemory usage` | token 用量:预热 team 与摘要的上下文成本估算 + 本进程 recall/extract/review 调用消耗 |
 | `/lmemory team start` / `stop` / `restart` | 组装 / 释放 / 重新组装 team |
 | `/lmemory query <text>` | 人主动查询长期记忆(fan-out 同 recall) |
 | `/lmemory config get` / `set <key> <value>` | 读写配置项(见 §9) |

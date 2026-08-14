@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { escapeCell, renderMd, renderSummary } from '../src/render.js'
+import { entryLine, escapeCell, renderMd, renderSummary } from '../src/render.js'
 import type { MemoryEntry } from '../src/schema.js'
 
 function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
@@ -24,6 +24,13 @@ describe('escapeCell', () => {
 
   it('leaves plain text untouched', () => {
     expect(escapeCell('plain')).toBe('plain')
+  })
+})
+
+describe('entryLine', () => {
+  it('renders the `[id|type|domain|scope] entry` node-text line shared by recall and review', () => {
+    expect(entryLine(entry({ type: 'lessons', domain: 'PromotedPitfalls', scope: '样本库', entry: '某坑' })))
+      .toBe('[m-0000000000|lessons|PromotedPitfalls|样本库] 某坑')
   })
 })
 

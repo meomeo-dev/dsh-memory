@@ -16,6 +16,16 @@ export function escapeCell(text: string): string {
   return text.replace(/\|/g, '\\|')
 }
 
+/**
+ * 一条记忆在节点文本里的一行:`[id|type|domain|scope] entry`。
+ * recall 与 review 节点共用(召回按 id 去重并逆查补全,review 按 id 指认缺陷)。
+ * @param entry - 归一化后的记忆条目。
+ * @returns 单行节点文本。
+ */
+export function entryLine(entry: MemoryEntry): string {
+  return `[${entry.id}|${entry.type}|${entry.domain}|${entry.scope}] ${entry.entry}`
+}
+
 /** 渲染一条记忆为 8 列表格行(首列 id + 7 个字段,不含首尾换行)。 */
 function renderRow(entry: MemoryEntry): string {
   const cells = [

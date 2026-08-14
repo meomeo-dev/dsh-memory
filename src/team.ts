@@ -94,15 +94,51 @@ function makeNode(id: number, sources: readonly MemorySource[], sizeBytes: numbe
   }
 }
 
-/** 按条目文本精确去重(保持首次出现顺序)。 */
+/** 一条召回/重排序行的解析投影(整行格式 `[id|type|domain|scope] entry`,见 render.entryLine)。 */
+export interface RecallLine {
+  /** 记忆 id;行不含 `[id|` 前缀时为 undefined(模型未照抄整行)。 */
+  readonly id?: string
+  /** 记忆类型(行内字段;降级解析用)。 */
+  readonly type?: string
+  /** 知识领域(行内字段;降级解析用)。 */
+  readonly domain?: string
+  /** 影响范围(行内字段;降级解析用)。 */
+  readonly scope?: string
+  /** 条目文本(前缀之后的全部文本)。 */
+  readonly entry: string
+}
+
+/** 解析一行召回结果为结构化投影;无 `[id|type|domain|scope]` 前缀时整行作为 entry(降级)。 */
+export function parseRecallLine(line: string): RecallLine {
+  const trimmed = line.trim()
+  const match = /^\[([^\]|]+)(?:\|([^\]|]+))?(?:\|([^\]|]+))?(?:\|([^\]]*))?\]\s*(.*)$/.exec(trimmed)
+  if (match === null) return { entry: trimmed }
+  const [id, type, domain, scope] = [match[1], match[2], match[3], match[4]]
+  const entry = match[5] ?? ''
+  if (id === undefined || id.length === 0) return { entry: trimmed }
+  return {
+    id,
+    ...(type === undefined || type.length === 0 ? {} : { type }),
+    ...(domain === undefined || domain.length === 0 ? {} : { domain }),
+    ...(scope === undefined || scope.length === 0 ? {} : { scope }),
+    entry,
+  }
+}
+
+/** 去重键:有 id 的行按 id(唯一编号),否则按整行文本(降级)。 */
+function lineKey(line: string): string {
+  return parseRecallLine(line).id ?? line.trim()
+}
+
+/** 按 id(或整行文本降级)精确去重(保持首次出现顺序)。 */
 export function dedupe(candidates: readonly string[]): string[] {
   const seen = new Set<string>()
   const result: string[] = []
   for (const candidate of candidates) {
-    const key = candidate.trim()
+    const key = lineKey(candidate)
     if (key.length === 0 || seen.has(key)) continue
     seen.add(key)
-    result.push(key)
+    result.push(candidate.trim())
   }
   return result
 }
@@ -128,7 +164,7 @@ export function warmUp(sources: readonly MemorySource[], maxNodeKb: number): Rec
  * @param rerank - 重排序调用器(模型调用注入;候选 ≤1 时跳过)。
  * @param topK - 返回的最大条目数。
  * @param onNodeFailure - 节点失败告警回调(注入)。
- * @returns 按相关度排序、去重后的条目文本(≤ topK)。
+ * @returns 按相关度排序、按 id 去重后的条目整行(≤ topK;行格式见 render.entryLine)。
  */
 export async function recall(
   team: RecallTeam,

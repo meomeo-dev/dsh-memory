@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   byteLength,
   dedupe,
+  parseRecallLine,
   partitionNodes,
   recall,
   warmUp,
@@ -58,6 +59,24 @@ describe('partitionNodes', () => {
   })
 })
 
+describe('parseRecallLine', () => {
+  it('parses a full `[id|type|domain|scope] entry` line', () => {
+    expect(parseRecallLine('[m-0000000001|rules|Style|全项目] 两空格缩进')).toEqual({
+      id: 'm-0000000001',
+      type: 'rules',
+      domain: 'Style',
+      scope: '全项目',
+      entry: '两空格缩进',
+    })
+  })
+
+  it('parses a partial prefix and degrades bare text to entry-only', () => {
+    expect(parseRecallLine('[m-0000000001] 某条目').entry).toBe('某条目')
+    expect(parseRecallLine('纯文本条目')).toEqual({ entry: '纯文本条目' })
+    expect(parseRecallLine('  ')).toEqual({ entry: '' })
+  })
+})
+
 describe('dedupe', () => {
   it('dedupes exact matches and keeps first-seen order', () => {
     expect(dedupe(['a', 'b', 'a', 'c'])).toEqual(['a', 'b', 'c'])
@@ -65,6 +84,13 @@ describe('dedupe', () => {
 
   it('trims and skips empty candidates', () => {
     expect(dedupe([' a ', '', 'b', '  '])).toEqual(['a', 'b'])
+  })
+
+  it('dedupes by id across differently-worded lines (same id wins first-seen)', () => {
+    const same = '[m-0000000001|rules|Style|全项目] 两空格缩进'
+    const reworded = '[m-0000000001|rules|Style|全项目] 两个空格缩进'
+    const other = '[m-0000000002|rules|Style|全项目] 用 pnpm'
+    expect(dedupe([same, other, reworded])).toEqual([same, other])
   })
 })
 

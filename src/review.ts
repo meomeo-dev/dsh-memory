@@ -55,10 +55,10 @@ export type CrossNodeReviewFn = (entries: readonly MemoryEntry[]) => Promise<rea
 /** 节点/跨节点失败告警回调(注入;由 index.ts 绑定 ctx.logger.warn)。 */
 export type ReviewFailureFn = (nodeId: string, error: unknown) => void
 
-/** 一条记忆在 review 节点文本里的一行:`[id|type|domain|scope] entry`。 */
-export function reviewEntryLine(entry: MemoryEntry): string {
-  return `[${entry.id}|${entry.type}|${entry.domain}|${entry.scope}] ${entry.entry}`
-}
+/** 一条记忆在 review 节点文本里的一行:`[id|type|domain|scope] entry`(与 recall 共用 render.entryLine)。 */
+import { entryLine } from './render.js'
+
+export { entryLine as reviewEntryLine } from './render.js'
 
 /**
  * 把记忆条目转成 review 节点源(每条一个源,文本带 id,供模型指认缺陷目标)。
@@ -66,7 +66,7 @@ export function reviewEntryLine(entry: MemoryEntry): string {
  * @returns 记忆源列表(供 `warmUp` 分区)。
  */
 export function reviewSourcesFor(entries: readonly MemoryEntry[]): MemorySource[] {
-  return entries.map(entry => ({ id: entry.id, text: reviewEntryLine(entry) }))
+  return entries.map(entry => ({ id: entry.id, text: entryLine(entry) }))
 }
 
 /**

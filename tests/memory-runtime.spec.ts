@@ -44,7 +44,7 @@ describe('sourcesFor', () => {
     seedProjectFile('两空格缩进')
     const sources = sourcesFor(project)
     expect(sources).toHaveLength(1)
-    expect(sources[0]!.text).toBe('[rules|Style] 两空格缩进')
+    expect(sources[0]!.text).toBe('[m-0000000000|rules|Style|全项目] 两空格缩进')
   })
 })
 

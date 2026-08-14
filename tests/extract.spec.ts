@@ -46,10 +46,39 @@ describe('parseExtraction', () => {
     expect(rules[0]!.entry).toBe('有效条目')
   })
 
-  it('keeps `|` inside the entry text (only the first two separators split)', () => {
-    const rules = parseExtraction('Style|全项目|a|b|c', 'rules')
+  it('parses optional entryPoint/references fields (4th/5th segments)', () => {
+    const rules = parseExtraction('Style|全项目|两空格缩进|src/index.ts|docs/style.md', 'rules')
     expect(rules).toHaveLength(1)
-    expect(rules[0]!.entry).toBe('a|b|c')
+    expect(rules[0]!.entry).toBe('两空格缩进')
+    expect(rules[0]!.entryPoint).toBe('src/index.ts')
+    expect(rules[0]!.references).toBe('docs/style.md')
+  })
+
+  it('normalizes missing entryPoint/references (`-`, blank, or absent) to undefined', () => {
+    const rules = parseExtraction(
+      [
+        'DurablePrefs|全项目|用 pnpm|-|-',
+        'Style|全项目|两空格|src/index.ts',
+        'CodeFacts|全项目|某事实|src/a.ts|-',
+        'Style|全项目|三字段旧式',
+      ].join('\n'),
+      'rules',
+    )
+    expect(rules).toHaveLength(4)
+    expect(rules[0]!.entryPoint).toBeUndefined()
+    expect(rules[0]!.references).toBeUndefined()
+    expect(rules[1]!.entryPoint).toBe('src/index.ts')
+    expect(rules[1]!.references).toBeUndefined()
+    expect(rules[2]!.entryPoint).toBe('src/a.ts')
+    expect(rules[2]!.references).toBeUndefined()
+    expect(rules[3]!.entryPoint).toBeUndefined()
+    expect(rules[3]!.references).toBeUndefined()
+  })
+
+  it('drops segments beyond the fifth (paths never contain `|`)', () => {
+    const rules = parseExtraction('Style|全项目|两空格|src/index.ts|docs/a.md|多余段', 'rules')
+    expect(rules).toHaveLength(1)
+    expect(rules[0]!.references).toBe('docs/a.md')
   })
 
   it('drops lessons entries over the 300-character cap', () => {

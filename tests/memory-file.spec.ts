@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { discoverEntries, memoryWriteRoots, visibleMemoryDirs } from '../src/memory-file.js'
+import { discoverEntries, memoryWriteRoots, resolveRecalled, visibleMemoryDirs } from '../src/memory-file.js'
 import { isMemoryId } from '../src/schema.js'
 
 let dshHome: string
@@ -67,6 +67,73 @@ describe('discoverEntries (migrating read of legacy rows)', () => {
     // 迁移已落盘,再次读取补出同一 id(而非每次读生成临时 id)。
     const second = discoverEntries(project)
     expect(second[0]!.id).toBe(first[0]!.id)
+  })
+})
+
+describe('resolveRecalled', () => {
+  function seed(entry: string, entryPoint = '-', references = '-'): void {
+    const dir = join(project, '.dsh', 'memory')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, '2026-08-14.lessons.remember.jsonl'),
+      `${JSON.stringify({ id: 'm-0000000001', schemaVersion: 1, type: 'lessons', domain: 'PromotedPitfalls', scope: '样本库', layer: 'project', entry, entryPoint, references })}\n`,
+      'utf8',
+    )
+  }
+
+  it('resolves a recalled line by id into the full entry from the truth source', () => {
+    seed('某坑根因', 'src/index.ts', 'docs/a.md')
+    const resolved = resolveRecalled(project, ['[m-0000000001|lessons|PromotedPitfalls|样本库] 某坑根因'])
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]).toEqual({
+      id: 'm-0000000001',
+      file: '2026-08-14.lessons.remember.jsonl',
+      type: 'lessons',
+      domain: 'PromotedPitfalls',
+      scope: '样本库',
+      layer: 'project',
+      entry: '某坑根因',
+      entryPoint: 'src/index.ts',
+      references: 'docs/a.md',
+    })
+  })
+
+  it('degrades to in-line fields with `-` placeholders when the id misses', () => {
+    seed('某坑根因')
+    const resolved = resolveRecalled(project, ['[m-9999999999|rules|Style|全项目] 不存在的条目'])
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]!.id).toBe('m-9999999999')
+    expect(resolved[0]!.type).toBe('rules')
+    expect(resolved[0]!.entry).toBe('不存在的条目')
+    expect(resolved[0]!.file).toBe('-')
+    expect(resolved[0]!.layer).toBe('-')
+    expect(resolved[0]!.entryPoint).toBe('-')
+    expect(resolved[0]!.references).toBe('-')
+  })
+
+  it('degrades a bare-text line (model did not copy the whole line) to entry only', () => {
+    seed('某坑根因')
+    const resolved = resolveRecalled(project, ['某坑根因'])
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]!.id).toBe('-')
+    expect(resolved[0]!.entry).toBe('某坑根因')
+    expect(resolved[0]!.entryPoint).toBe('-')
+  })
+
+  it('preserves input order and resolves duplicates by id into distinct entries', () => {
+    const dir = join(project, '.dsh', 'memory')
+    mkdirSync(dir, { recursive: true })
+    const row = (id: string, entry: string) => `${JSON.stringify({ id, schemaVersion: 1, type: 'rules', domain: 'Style', scope: '全项目', layer: 'project', entry, entryPoint: '-', references: '-' })}\n`
+    writeFileSync(
+      join(dir, '2026-08-14.rules.remember.jsonl'),
+      row('m-0000000001', '第一条') + row('m-0000000002', '第二条'),
+      'utf8',
+    )
+    const resolved = resolveRecalled(project, [
+      '[m-0000000002|rules|Style|全项目] 第二条',
+      '[m-0000000001|rules|Style|全项目] 第一条',
+    ])
+    expect(resolved.map(r => r.entry)).toEqual(['第二条', '第一条'])
   })
 })
 
