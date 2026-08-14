@@ -52,6 +52,9 @@ export type NodeReviewFn = (node: MemoryNode) => Promise<readonly ReviewFinding[
 /** 跨节点判矛盾/重复调用器(模型注入):给定全部条目,返回跨节点缺陷。 */
 export type CrossNodeReviewFn = (entries: readonly MemoryEntry[]) => Promise<readonly ReviewFinding[]>
 
+/** 节点/跨节点失败告警回调(注入;由 index.ts 绑定 ctx.logger.warn)。 */
+export type ReviewFailureFn = (nodeId: string, error: unknown) => void
+
 /** 一条记忆在 review 节点文本里的一行:`[id|type|domain|scope] entry`。 */
 export function reviewEntryLine(entry: MemoryEntry): string {
   return `[${entry.id}|${entry.type}|${entry.domain}|${entry.scope}] ${entry.entry}`
@@ -186,12 +189,15 @@ export function dedupeFindings(findings: readonly ReviewFinding[]): ReviewFindin
 /**
  * 执行一次质检:fan-out 各节点审查本节点内缺陷 → 跨节点再判矛盾/重复 → 聚合去重。
  *
+ * per-node 容错(robustness.md §2):单节点失败跳过并告警,其余节点缺陷照常;跨节点
+ * 判失败则降级为只用节点内发现;全部节点失败才抛「all nodes failed」。
  * 单节点时跳过跨节点判(本节点审查已覆盖全部条目);≥2 节点时才补跨节点,
  * 捕捉分在不同节点的同义/冲突记忆(docs/memory-review.md §4)。
  * @param team - 已预热 team(带 id 节点文本)。
  * @param entries - 全部归一化记忆条目(供跨节点判矛盾/重复)。
  * @param nodeReviewFn - 单节点审查调用器(模型注入)。
  * @param crossNodeReviewFn - 跨节点审查调用器(模型注入)。
+ * @param onNodeFailure - 节点/跨节点失败告警回调(注入)。
  * @returns 聚合去重后的缺陷发现。
  */
 export async function runReview(
@@ -199,10 +205,29 @@ export async function runReview(
   entries: readonly MemoryEntry[],
   nodeReviewFn: NodeReviewFn,
   crossNodeReviewFn: CrossNodeReviewFn,
+  onNodeFailure: ReviewFailureFn,
 ): Promise<ReviewFinding[]> {
-  const intra = await Promise.all(team.nodes.map(node => nodeReviewFn(node)))
-  const cross = team.nodes.length > 1 ? await crossNodeReviewFn(entries) : []
-  return dedupeFindings([...intra.flat(), ...cross])
+  if (team.nodes.length === 0) return []
+  const settled = await Promise.allSettled(team.nodes.map(node => nodeReviewFn(node)))
+  const intra = settled.flatMap((r) => {
+    if (r.status === 'rejected') {
+      const node = team.nodes[settled.indexOf(r)]!
+      onNodeFailure(node.id, r.reason)
+      return []
+    }
+    return [...r.value]
+  })
+  if (settled.every(r => r.status === 'rejected')) throw new Error('memory review: all nodes failed')
+  let cross: ReviewFinding[] = []
+  if (team.nodes.length > 1) {
+    try {
+      cross = [...await crossNodeReviewFn(entries)]
+    } catch (error) {
+      // 跨节点判失败 → 降级为只用节点内发现(不丢 intra)。
+      onNodeFailure('cross-node', error)
+    }
+  }
+  return dedupeFindings([...intra, ...cross])
 }
 
 /**

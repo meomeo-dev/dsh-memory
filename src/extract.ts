@@ -23,6 +23,9 @@ import type { DomainId, LayerId, MemoryType } from './schema.js'
 /** 一个抽取节点的模型调用器(注入):给定会话文本,返回该 type 的结构化输出原始文本。 */
 export type ExtractFn = (transcript: string) => Promise<string>
 
+/** 抽取节点失败告警回调(注入;由 index.ts 绑定 ctx.logger.warn)。 */
+export type ExtractFailureFn = (type: MemoryType, error: unknown) => void
+
 /** 抽取出的候选条目(尚未落盘,无 `id` / `layer`)。 */
 export interface ExtractedCandidate {
   /** 记忆类型(该节点负责的类型)。 */
@@ -100,20 +103,30 @@ export function parseExtraction(text: string, type: MemoryType): ExtractedCandid
 
 /**
  * 并行 fan-out 到两个抽取节点(rules / lessons),各自解析、去重,互不干扰。
+ *
+ * per-node 容错(robustness.md §2):单类型节点失败 → 该类型返回空候选、另一类型
+ * 照常;两类型全失败才抛「all extractors failed」(LLM 完全不可用)。
  * @param transcript - 会话窗口文本(主会话此刻模型上下文,§4)。
  * @param rulesFn - rules 抽取节点调用器(模型注入)。
  * @param lessonsFn - lessons 抽取节点调用器(模型注入)。
+ * @param onNodeFailure - 抽取节点失败告警回调(注入)。
  * @returns 两类候选条目。
  */
 export async function extractBoth(
   transcript: string,
   rulesFn: ExtractFn,
   lessonsFn: ExtractFn,
+  onNodeFailure: ExtractFailureFn,
 ): Promise<ExtractionResult> {
-  const [rulesText, lessonsText] = await Promise.all([rulesFn(transcript), lessonsFn(transcript)])
+  const [rules, lessons] = await Promise.allSettled([rulesFn(transcript), lessonsFn(transcript)])
+  if (rules.status === 'rejected' && lessons.status === 'rejected') {
+    throw new Error('memory auto-extraction: all extractors failed')
+  }
+  if (rules.status === 'rejected') onNodeFailure('rules', rules.reason)
+  if (lessons.status === 'rejected') onNodeFailure('lessons', lessons.reason)
   return {
-    rules: parseExtraction(rulesText, 'rules'),
-    lessons: parseExtraction(lessonsText, 'lessons'),
+    rules: rules.status === 'fulfilled' ? parseExtraction(rules.value, 'rules') : [],
+    lessons: lessons.status === 'fulfilled' ? parseExtraction(lessons.value, 'lessons') : [],
   }
 }
 

@@ -36,6 +36,9 @@ export type NodeRecallFn = (node: MemoryNode, query: string) => Promise<readonly
 /** 聚合阶段对去重后的候选按相关度重排序(仅返回排序后的条目文本)。 */
 export type RerankFn = (query: string, candidates: readonly string[]) => Promise<readonly string[]>
 
+/** 节点失败告警回调(注入;纯逻辑模块不 import cordis,由 index.ts 绑定 ctx.logger.warn)。 */
+export type NodeFailureFn = (nodeId: string, error: unknown) => void
+
 /** 一段待分配进节点的记忆源文本。 */
 export interface MemorySource {
   /** 源标识(用于诊断)。 */
@@ -116,11 +119,15 @@ export function warmUp(sources: readonly MemorySource[], maxNodeKb: number): Rec
 
 /**
  * 召回:并发 fan-out 到每个节点 → 汇总 → 去重 → 重排序 → 截断到 topK。
+ *
+ * per-node 容错(robustness.md §2):单节点失败跳过并告警,其余节点结果照常聚合;
+ * 全部节点失败才抛「all nodes failed」(LLM 完全不可用)。空 team(0 节点)直接返回空。
  * @param team - 已预热 team。
  * @param query - 召回查询。
  * @param recallFn - 单节点召回调用器(模型调用注入)。
  * @param rerank - 重排序调用器(模型调用注入;候选 ≤1 时跳过)。
  * @param topK - 返回的最大条目数。
+ * @param onNodeFailure - 节点失败告警回调(注入)。
  * @returns 按相关度排序、去重后的条目文本(≤ topK)。
  */
 export async function recall(
@@ -129,9 +136,19 @@ export async function recall(
   recallFn: NodeRecallFn,
   rerank: RerankFn,
   topK: number,
+  onNodeFailure: NodeFailureFn,
 ): Promise<string[]> {
-  const fanOut = await Promise.all(team.nodes.map(node => recallFn(node, query)))
-  const candidates = dedupe(fanOut.flat())
+  if (team.nodes.length === 0) return []
+  const settled = await Promise.allSettled(team.nodes.map(node => recallFn(node, query)))
+  const fulfilled = settled.filter((r): r is PromiseFulfilledResult<readonly string[]> => r.status === 'fulfilled')
+  for (const r of settled) {
+    if (r.status === 'rejected') {
+      const node = team.nodes[settled.indexOf(r)]!
+      onNodeFailure(node.id, r.reason)
+    }
+  }
+  if (fulfilled.length === 0) throw new Error('memory recall: all nodes failed')
+  const candidates = dedupe(fulfilled.flatMap(r => r.value))
   if (candidates.length === 0) return []
   const ordered = candidates.length <= 1 ? candidates : await rerank(query, candidates)
   return ordered.slice(0, Math.max(0, topK))

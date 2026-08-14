@@ -12,6 +12,9 @@ import {
 import type { CrossNodeReviewFn, NodeReviewFn, ReviewFinding } from '../src/review.js'
 import type { MemoryEntry, MemoryId } from '../src/schema.js'
 
+/** 节点失败告警 noop。 */
+const noopFailure = (): void => {}
+
 function entry(id: string, overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     id: id as MemoryId,
@@ -78,7 +81,7 @@ describe('runReview', () => {
         ? [finding({ id: 'm-0000000000', related: ['m-0000000001' as MemoryId] })]
         : []
     const crossNodeReviewFn: CrossNodeReviewFn = async () => []
-    const result = await runReview(team, entries, nodeReviewFn, crossNodeReviewFn)
+    const result = await runReview(team, entries, nodeReviewFn, crossNodeReviewFn, noopFailure)
     expect(result).toHaveLength(1)
     expect(result[0]!.id).toBe('m-0000000000')
     expect(result[0]!.related).toEqual(['m-0000000001'])
@@ -96,7 +99,7 @@ describe('runReview', () => {
     const crossNodeReviewFn: CrossNodeReviewFn = async () => [
       finding({ id: 'm-0000000000', problem: 'duplicate', related: ['m-0000000001' as MemoryId], suggest: 'merge' }),
     ]
-    const result = await runReview(team, entries, nodeReviewFn, crossNodeReviewFn)
+    const result = await runReview(team, entries, nodeReviewFn, crossNodeReviewFn, noopFailure)
     expect(result).toHaveLength(1)
     expect(result[0]!.problem).toBe('duplicate')
   })
@@ -109,7 +112,7 @@ describe('runReview', () => {
       crossCalled = true
       return []
     }
-    await runReview(team, entries, async () => [], crossNodeReviewFn)
+    await runReview(team, entries, async () => [], crossNodeReviewFn, noopFailure)
     expect(crossCalled).toBe(false)
   })
 
@@ -120,8 +123,42 @@ describe('runReview', () => {
     const shared = finding({ id: 'm-0000000000', related: ['m-0000000001' as MemoryId] })
     const nodeReviewFn: NodeReviewFn = async () => [shared]
     const crossNodeReviewFn: CrossNodeReviewFn = async () => [shared]
-    const result = await runReview(team, entries, nodeReviewFn, crossNodeReviewFn)
+    const result = await runReview(team, entries, nodeReviewFn, crossNodeReviewFn, noopFailure)
     expect(result).toHaveLength(1)
+  })
+
+  it('skips a failed node and keeps the healthy nodes findings', async () => {
+    const entries = [entry('m-0000000000'), entry('m-0000000001')]
+    const pad = 'x'.repeat(1024)
+    const team = warmUp([{ id: 'a', text: pad }, { id: 'b', text: pad }], 1)
+    const nodeReviewFn: NodeReviewFn = async (node) => {
+      if (node.id === 'node-1') throw new Error('node a down')
+      return [finding({ id: 'm-0000000001' })]
+    }
+    const failed: string[] = []
+    const result = await runReview(team, entries, nodeReviewFn, async () => [], (id) => { failed.push(id) })
+    expect(result).toHaveLength(1)
+    expect(result[0]!.id).toBe('m-0000000001')
+    expect(failed).toEqual(['node-1'])
+  })
+
+  it('degrades to intra-node findings when cross-node judgement fails', async () => {
+    const entries = [entry('m-0000000000'), entry('m-0000000001')]
+    const pad = 'x'.repeat(1024)
+    const team = warmUp([{ id: 'a', text: pad }, { id: 'b', text: pad }], 1)
+    const nodeReviewFn: NodeReviewFn = async () => [finding({ id: 'm-0000000000' })]
+    const failed: string[] = []
+    const result = await runReview(team, entries, nodeReviewFn, async () => { throw new Error('cross down') }, (id) => { failed.push(id) })
+    expect(result).toHaveLength(1)
+    expect(failed).toEqual(['cross-node'])
+  })
+
+  it('throws when every node fails', async () => {
+    const entries = [entry('m-0000000000'), entry('m-0000000001')]
+    const pad = 'x'.repeat(1024)
+    const team = warmUp([{ id: 'a', text: pad }, { id: 'b', text: pad }], 1)
+    const nodeReviewFn: NodeReviewFn = async () => { throw new Error('down') }
+    await expect(runReview(team, entries, nodeReviewFn, async () => [], noopFailure)).rejects.toThrow(/all nodes failed/)
   })
 })
 

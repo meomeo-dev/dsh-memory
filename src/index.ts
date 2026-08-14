@@ -198,6 +198,11 @@ async function callFlash(
   return text
 }
 
+/** 节点失败告警(per-node 容错的可观测性;绑定 ctx.logger.warn,不中断流程)。 */
+function warnNode(ctx: Context, label: string, error: unknown): void {
+  ctx.logger.warn(`dsh-memory: ${label} failed: ${error instanceof Error ? error.message : String(error)}`)
+}
+
 /** 执行一次召回:预热 team → fan-out → 聚合。 */
 async function doRecall(ctx: Context, runtime: Runtime, cwd: string | undefined, query: string): Promise<string[]> {
   const team = ensureTeam(runtime.state, cwd, runtime.config)
@@ -215,7 +220,7 @@ async function doRecall(ctx: Context, runtime: Runtime, cwd: string | undefined,
     const ordered = parseLines(response)
     return ordered.length > 0 ? ordered : candidates
   }
-  return recallTeam(team, query, nodeFn, rerankFn, runtime.config.recallTopK)
+  return recallTeam(team, query, nodeFn, rerankFn, runtime.config.recallTopK, (nodeId, error) => warnNode(ctx, `recall node ${nodeId}`, error))
 }
 
 /** 质检节点 system prompt(固定,非配置项;只输出 JSON 数组)。 */
@@ -255,7 +260,7 @@ async function doReview(
     const response = await callFlash(ctx, runtime.config, CROSS_NODE_REVIEW_SYSTEM, `记忆条目:\n${text}`, runtime.config.reviewModel)
     return parseFindings(response, knownIds)
   }
-  return runReview(team, entries, nodeReviewFn, crossNodeReviewFn)
+  return runReview(team, entries, nodeReviewFn, crossNodeReviewFn, (nodeId, error) => warnNode(ctx, `review ${nodeId}`, error))
 }
 
 /** 从一条消息的 content blocks 提取纯文本(只取 text 块,跳过 reasoning/tool/图片)。 */
@@ -296,7 +301,7 @@ async function runExtraction(ctx: Context, runtime: Runtime, agent: Agent): Prom
   const transcript = buildTranscript(toTranscript(agent.session.deriveMessages()))
   const rulesFn: ExtractFn = text => callFlash(ctx, runtime.config, runtime.config.extractRulesPrompt, text)
   const lessonsFn: ExtractFn = text => callFlash(ctx, runtime.config, runtime.config.extractLessonsPrompt, text)
-  const result = await extractBoth(transcript, rulesFn, lessonsFn)
+  const result = await extractBoth(transcript, rulesFn, lessonsFn, (type, error) => warnNode(ctx, `extract ${type}`, error))
   const layer = deriveLayer(cwd)
   const existingLessons = new Set(find(cwd, { type: 'lessons' }).map(found => found.entry.entry))
   for (const candidate of result.rules) {

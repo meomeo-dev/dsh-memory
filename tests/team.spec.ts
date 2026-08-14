@@ -19,6 +19,9 @@ function containRecall(keyword: string): NodeRecallFn {
 
 const identityRerank: RerankFn = async (_query, candidates) => candidates
 
+/** 节点失败告警 noop(容错测试里捕获失败用)。 */
+const noopFailure = (): void => {}
+
 describe('byteLength', () => {
   it('counts UTF-8 bytes', () => {
     expect(byteLength('a')).toBe(1)
@@ -72,7 +75,7 @@ describe('warmUp / recall', () => {
     const team = warmUp([source('a', `${pad}alpha`), source('b', `${pad}alpha`), source('c', `${pad}beta`)], 1)
     const recallFn: NodeRecallFn = async node =>
       node.text.includes('alpha') ? ['alpha'] : ['beta']
-    const result = await recall(team, 'q', recallFn, identityRerank, 10)
+    const result = await recall(team, 'q', recallFn, identityRerank, 10, noopFailure)
     expect(result).toEqual(['alpha', 'beta'])
   })
 
@@ -80,7 +83,7 @@ describe('warmUp / recall', () => {
     const team = warmUp([source('a', 'one\n\ntwo\n\nthree')], 1)
     const recallFn: NodeRecallFn = async node => node.text.split('\n\n')
     const rerank: RerankFn = async (_query, candidates) => [...candidates].reverse()
-    const result = await recall(team, 'q', recallFn, rerank, 2)
+    const result = await recall(team, 'q', recallFn, rerank, 2, noopFailure)
     expect(result).toEqual(['three', 'two'])
   })
 
@@ -92,7 +95,7 @@ describe('warmUp / recall', () => {
       reranked = true
       return candidates
     }
-    const result = await recall(team, 'q', recallFn, rerank, 10)
+    const result = await recall(team, 'q', recallFn, rerank, 10, noopFailure)
     expect(result).toEqual(['only'])
     expect(reranked).toBe(false)
   })
@@ -100,7 +103,7 @@ describe('warmUp / recall', () => {
   it('returns empty for no candidates', async () => {
     const team = warmUp([source('a', 'x')], 1)
     const recallFn: NodeRecallFn = async () => []
-    expect(await recall(team, 'q', recallFn, identityRerank, 10)).toEqual([])
+    expect(await recall(team, 'q', recallFn, identityRerank, 10, noopFailure)).toEqual([])
   })
 
   it('runs node recalls concurrently', async () => {
@@ -115,8 +118,35 @@ describe('warmUp / recall', () => {
       active -= 1
       return [node.text.trim()]
     }
-    await recall(team, 'q', recallFn, identityRerank, 10)
+    await recall(team, 'q', recallFn, identityRerank, 10, noopFailure)
     expect(maxActive).toBe(3)
+  })
+
+  it('skips a failed node and returns the healthy nodes results', async () => {
+    const pad = `${'x'.repeat(1024)} `
+    const team = warmUp([source('a', `${pad}alpha`), source('b', `${pad}beta`), source('c', `${pad}gamma`)], 1)
+    const recallFn: NodeRecallFn = async (node) => {
+      if (node.text.includes('beta')) throw new Error('node b down')
+      return [node.text.includes('alpha') ? 'alpha' : 'gamma']
+    }
+    const failed: string[] = []
+    const result = await recall(team, 'q', recallFn, identityRerank, 10, (id) => { failed.push(id) })
+    expect(result.sort()).toEqual(['alpha', 'gamma'])
+    expect(failed).toEqual(['node-2'])
+  })
+
+  it('throws when every node fails', async () => {
+    const pad = `${'x'.repeat(1024)} `
+    const team = warmUp([source('a', `${pad}alpha`), source('b', `${pad}beta`)], 1)
+    const recallFn: NodeRecallFn = async () => { throw new Error('down') }
+    await expect(recall(team, 'q', recallFn, identityRerank, 10, noopFailure)).rejects.toThrow(/all nodes failed/)
+  })
+
+  it('returns empty for an empty team without calling the model', async () => {
+    let called = false
+    const recallFn: NodeRecallFn = async () => { called = true; return [] }
+    expect(await recall(warmUp([], 1), 'q', recallFn, identityRerank, 10, noopFailure)).toEqual([])
+    expect(called).toBe(false)
   })
 })
 

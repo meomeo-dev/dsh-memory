@@ -14,6 +14,9 @@ import {
 } from '../src/extract.js'
 import type { ExtractFn } from '../src/extract.js'
 
+/** 抽取节点失败告警 noop。 */
+const noopFailure = (): void => {}
+
 describe('parseExtraction', () => {
   it('parses `domain|scope|entry` lines into candidates', () => {
     const text = 'DurablePrefs|全项目|提交信息用 Conventional Commits\nStyle|Web UI|两空格缩进'
@@ -71,7 +74,7 @@ describe('extractBoth', () => {
       expect(transcript).toContain('用 pnpm')
       return 'PromotedPitfalls|样本库|某模块在 X 平台有坑'
     }
-    const result = await extractBoth('user: 用 pnpm', rulesFn, lessonsFn)
+    const result = await extractBoth('user: 用 pnpm', rulesFn, lessonsFn, noopFailure)
     expect(result.rules).toHaveLength(1)
     expect(result.rules[0]!.type).toBe('rules')
     expect(result.lessons).toHaveLength(1)
@@ -89,8 +92,23 @@ describe('extractBoth', () => {
       active -= 1
       return ''
     }
-    await extractBoth('x', node, node)
+    await extractBoth('x', node, node, noopFailure)
     expect(maxActive).toBe(2)
+  })
+
+  it('returns empty for a failed type and keeps the other type', async () => {
+    const rulesFn: ExtractFn = async () => 'DurablePrefs|全项目|用 pnpm'
+    const lessonsFn: ExtractFn = async () => { throw new Error('lessons down') }
+    const failed: string[] = []
+    const result = await extractBoth('x', rulesFn, lessonsFn, (type) => { failed.push(type) })
+    expect(result.rules).toHaveLength(1)
+    expect(result.lessons).toEqual([])
+    expect(failed).toEqual(['lessons'])
+  })
+
+  it('throws when both extractors fail', async () => {
+    const down: ExtractFn = async () => { throw new Error('down') }
+    await expect(extractBoth('x', down, down, noopFailure)).rejects.toThrow(/all extractors failed/)
   })
 })
 
