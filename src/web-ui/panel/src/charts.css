@@ -225,28 +225,62 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 日历热力图(列=周,行=周一..周日)。 */
+/* 日历热力图(table 布局:列=周,行=周一..周日;格子随卡片宽度自适应)。
+   表头 = 每周周一日期(MM-DD),左列 = 周一..周日标签。 */
 .heatmap-wrap {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.heatmap {
-  display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(7, 12px);
-  gap: 3px;
+.heatmap-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 3px;
 }
 
+.heatmap-table th {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-caption);
+  white-space: nowrap;
+}
+
+.heatmap-corner {
+  width: 30px;
+}
+
+.heatmap-week {
+  text-align: center;
+}
+
+.heatmap-weekday {
+  width: 30px;
+  text-align: right;
+  padding-right: 6px;
+}
+
+.heatmap-cell {
+  padding: 0;
+}
+
+/* 方形热度格:宽度 = 表格列宽(自适应),高度 = 宽度(等比例)。 */
+.heat-dot {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 3px;
+}
+
+.heatmap-cell.out .heat-dot {
+  opacity: 0.25;
+}
+
+/* 图例(保持固定小方片)。 */
 .heat-cell {
   width: 12px;
   height: 12px;
   border-radius: 3px;
-}
-
-.heat-cell.out {
-  opacity: 0.25;
 }
 
 .heat-legend {

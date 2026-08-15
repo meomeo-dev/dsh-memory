@@ -120,6 +120,14 @@ function dayCostText(day: DayUsage, cost: { readonly yuan?: number; readonly mis
   return `¥${cost.yuan.toFixed(2)}`
 }
 
+/** 小时桶成本文案:无调用 `—`;缺价 `—(缺价 N 行)`;小值 4 位小数(时级金额常小于 0.01 元),否则两位。 */
+export function hourCostText(bucket: HourUsage): string {
+  if (bucket.total === 0) return '—'
+  if (bucket.missingPricingRows !== undefined && bucket.missingPricingRows > 0) return `—(缺价 ${bucket.missingPricingRows} 行)`
+  if (bucket.yuan !== undefined) return bucket.yuan < 0.01 ? `¥${bucket.yuan.toFixed(4)}` : `¥${bucket.yuan.toFixed(2)}`
+  return '—'
+}
+
 /** 近 14 天每日用量:紧凑水平条形图(日期 | 三段条 | 总 token | 当日成本,单行一项)。
  *  行可点击:选中某天后在其下方就地展开该天 24 小时水平柱状图(行高收窄);
  *  底部合计行在总 token 右侧显示近 14 天成本合计(docs/status-page-usage.md)。 */
@@ -176,7 +184,7 @@ export function DailyBars({ daily, hourly, costs, selectedDay, onSelect }: {
                       <span className="hbar-seg" style={{ width: width(bucket.review.totalTokens), background: CHART_COLORS.review }} title={`review ${bucket.review.totalTokens.toLocaleString()}`} />
                     </div>
                     <span className="hbar-metric">{bucket.total > 0 ? formatCompact(bucket.total) : '—'}</span>
-                    {costs !== undefined && <span className="hbar-cost" />}
+                    {costs !== undefined && <span className="hbar-cost">{hourCostText(bucket)}</span>}
                   </div>
                 ))}
                 {hoursOf(day.day).length === 0 && <p className="meta">该天无小时数据(旧 host 进程,重启后可用)。</p>}
@@ -258,14 +266,18 @@ function dayKeyOf(date: Date): string {
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
 }
 
-/** 近 12 周日历热力图(GitHub 风格:列=周,行=周一..周日,5 档强度)。 */
+/** 近 12 周日历热力图(table 布局:列=周(表头 MM-DD),行=周一..周日(左列标签),
+ *  5 档强度;格子随卡片宽度自适应,不再固定 12px)。 */
 export function CalendarHeatmap({ daily }: { readonly daily: readonly DayUsage[] }): JSX.Element {
   const byDay = useMemo(() => new Map(daily.map(day => [day.day, day])), [daily])
   const today = daily.length > 0 ? parseDay(daily[daily.length - 1]!.day) : new Date()
   const weeks = 12
-  const cells: { key: string; level: 0 | 1 | 2 | 3 | 4; title: string; inWindow: boolean }[] = []
+  const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
+  const columns: { monday: string; cells: { key: string; level: 0 | 1 | 2 | 3 | 4; title: string; inWindow: boolean }[] }[] = []
   for (let col = 0; col < weeks; col++) {
     const weekEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (weeks - 1 - col) * 7)
+    const monday = dayKeyOf(new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate() - 6))
+    const cells: { key: string; level: 0 | 1 | 2 | 3 | 4; title: string; inWindow: boolean }[] = []
     for (let row = 0; row < 7; row++) {
       const date = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate() - (6 - row))
       const key = dayKeyOf(date)
@@ -279,19 +291,35 @@ export function CalendarHeatmap({ daily }: { readonly daily: readonly DayUsage[]
         inWindow,
       })
     }
+    columns.push({ monday, cells })
   }
   return (
     <div className="heatmap-wrap">
-      <div className="heatmap" role="img" aria-label="近 12 周每日 token 热力图">
-        {cells.map(cell => (
-          <span
-            key={cell.key}
-            className={`heat-cell${cell.inWindow ? '' : ' out'}`}
-            style={{ background: heatColor(cell.level) }}
-            title={cell.title}
-          />
-        ))}
-      </div>
+      <table className="heatmap-table" role="img" aria-label="近 12 周每日 token 热力图">
+        <thead>
+          <tr>
+            <th className="heatmap-corner" />
+            {columns.map(column => (
+              <th key={column.monday} className="heatmap-week">{column.monday.slice(5)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {weekdayLabels.map((label, row) => (
+            <tr key={label}>
+              <th className="heatmap-weekday">{label}</th>
+              {columns.map(column => {
+                const cell = column.cells[row]!
+                return (
+                  <td key={cell.key} className={`heatmap-cell${cell.inWindow ? '' : ' out'}`}>
+                    <span className="heat-dot" style={{ background: heatColor(cell.level) }} title={cell.title} />
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
       <div className="heat-legend">
         <span className="heat-legend-label">少</span>
         {([0, 1, 2, 3, 4] as const).map(level => (

@@ -4,21 +4,14 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { rpc } from '../api'
-import type { Bootstrap, Dashboard, HourUsage } from '../api'
+import type { Bootstrap, Dashboard } from '../api'
 import { formatCompact, formatBytes } from '../format'
-import { CalendarHeatmap, CHART_COLORS, DailyBars, Donut, StackedBars, StaticBars, TodayBars } from '../charts'
+import { CalendarHeatmap, CHART_COLORS, DailyBars, Donut, hourCostText, StackedBars, StaticBars, TodayBars } from '../charts'
 import { ActivityTable } from './ActivityTable'
 import './status.css'
 
 /** 状态页自动刷新间隔:记忆活动大表是实时视图(docs/memory-activity.md)。 */
 const POLL_MS = 60_000
-
-/** 明细表成本单元文案(与一级表同规则;hourly 桶缺价时 yuan 缺省)。 */
-function hourCostText(bucket: HourUsage): string {
-  if (bucket.missingPricingRows !== undefined && bucket.missingPricingRows > 0) return `—(缺价 ${bucket.missingPricingRows} 行)`
-  if (bucket.yuan !== undefined) return bucket.yuan.toFixed(2)
-  return '—'
-}
 
 /** 状态页:顶部 team 状态 → 中部统计指标块 → 正文 usage 图表。 */
 export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JSX.Element {
@@ -155,6 +148,21 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
           而不是白屏——升级后重启进程即恢复完整功能。 */}
       <section className="card">
         <span className="section-title">用量明细 (Usage, 近 14 天)</span>
+        {/* 日期胶囊:点击某天展开该天 24 小时二级表(与上方每日用量图共享选中态)。 */}
+        <div className="day-chips">
+          {usage.daily.slice(-14).map(day => (
+            <button
+              key={day.day}
+              type="button"
+              className={`day-chip${selectedDay === day.day ? ' selected' : ''}`}
+              title={`展开 ${day.day} 24 小时明细`}
+              onClick={() => setSelectedDay(selectedDay === day.day ? undefined : day.day)}
+            >
+              {day.day.slice(5)}
+            </button>
+          ))}
+        </div>
+        <p className="meta">点击日期胶囊或上方每日用量图的某天,展开该天 24 小时二级明细表(两处选中态联动)。</p>
         <div className="table-wrap">
           <table>
             <thead>
