@@ -548,6 +548,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
   }
 
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory', handler: servePage('memory') }), 'dsh-memory: /memory page')
+  ctx.effect(() => web.register({ kind: 'exact', path: '/memory/status', handler: servePage('status') }), 'dsh-memory: /memory/status page')
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/settings', handler: servePage('settings') }), 'dsh-memory: /memory/settings page')
   ctx.effect(() => web.register({
     kind: 'prefix',
@@ -597,6 +598,45 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
         }).filter(({ entry }) => filters.query === undefined || matchesPanelQuery(entry, filters.query))
         rows.sort((a, b) => b.entry.createdAt - a.entry.createdAt)
         return rows.map(({ entry, file }) => ({ entry, file }))
+      },
+      dashboard(cwd) {
+        const root = cwd ?? process.cwd()
+        const stats = computeStats(root)
+        let nodeChars = 0
+        let nodeCount = 0
+        for (const team of runtime.state.teams.values()) {
+          nodeCount += team.nodes.length
+          for (const node of team.nodes) nodeChars += node.text.length
+        }
+        const summaryChars = renderSummary(discoverEntries(root)).length
+        const labels: readonly UsageLabel[] = ['recall', 'extract', 'review']
+        return {
+          status: {
+            maxNodeKb: runtime.config.maxNodeKb,
+            teams: teamStatus(runtime.state).map(({ root: teamRoot, nodes }) => ({ root: teamRoot, nodes })),
+          },
+          stats: {
+            total: stats.total,
+            rules: stats.byType.rules,
+            lessons: stats.byType.lessons,
+            layers: { global: stats.byLayer.global, user: stats.byLayer.user, project: stats.byLayer.project },
+            domains: [...stats.byDomain.entries()]
+              .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+              .map(([domain, count]) => ({ domain, count })),
+            files: stats.files,
+            jsonlBytes: stats.jsonlBytes,
+            mdBytes: stats.mdBytes,
+            catalogEntries: stats.catalogEntries,
+          },
+          usage: {
+            warmTeams: { nodes: nodeCount, chars: nodeChars, tokens: estimateTokens(nodeChars) },
+            summary: { chars: summaryChars, tokens: estimateTokens(summaryChars) },
+            counters: labels.map(label => {
+              const counter = runtime.usage.get(label) ?? EMPTY_USAGE
+              return { label, ...counter }
+            }),
+          },
+        }
       },
       getConfig() {
         return describeConfig(runtime.config)
@@ -672,6 +712,7 @@ async function handleCommand(
           text: [
             'Memory panel (展开后复制 URL):',
             `  记忆面板: ${panelUrl(port, 'memory', token)}`,
+            `  状态面板: ${panelUrl(port, 'status', token)}`,
             `  设置面板: ${panelUrl(port, 'settings', token)}`,
           ].join('\n'),
         }

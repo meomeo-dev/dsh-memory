@@ -64,6 +64,9 @@
   --dsw-alias-state-error-primary: var(--dsw-static-red-600);
   --dsw-alias-state-success-primary: var(--dsw-static-green-500);
   --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+
+  /* 图表轨道色(纯 SVG 图表用,无外部图表库)。 */
+  --chart-track: var(--dsw-static-neutral-bluish-75);
 }
 
 * {
@@ -451,4 +454,225 @@ button.primary:hover:not(:disabled) {
 button.primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 状态页。 */
+.status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-title {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.refresh {
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.refresh:hover {
+  border-color: var(--dsw-alias-border-l3);
+  color: var(--dsw-alias-label-primary);
+}
+
+.section-title {
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+}
+
+.chip {
+  display: inline-block;
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--dsw-static-deepseek-50);
+  color: var(--dsw-static-deepseek-600);
+}
+
+.status-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.team-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.team-row:last-child {
+  border-bottom: none;
+}
+
+.team-root {
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-nodes {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* 统计指标块。 */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.metric-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-label {
+  font-size: 12px;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* usage 图表。 */
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.donut {
+  width: 140px;
+  height: 140px;
+  flex: none;
+}
+
+.donut-center {
+  font-size: 20px;
+  font-weight: 600;
+  fill: var(--dsw-alias-label-primary);
+}
+
+.donut-sub {
+  font-size: 11px;
+  fill: var(--dsw-alias-label-caption);
+}
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.legend-label {
+  flex: 1 1 auto;
+}
+
+.legend-value {
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bar-label {
+  flex: 0 0 110px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-track {
+  flex: 1 1 auto;
+  display: flex;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--dsw-static-neutral-bluish-75);
+  overflow: hidden;
+  min-width: 80px;
+}
+
+.bar-seg {
+  display: block;
+  height: 100%;
+  transition: width var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.bar-total {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }

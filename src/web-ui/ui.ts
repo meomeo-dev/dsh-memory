@@ -28,7 +28,8 @@ import z from '@deepseek-ai/schemastery'
 import { DOMAINS, LAYERS, MEMORY_TYPES } from '../schema.js'
 import type { DomainId, LayerId, MemoryEntry, MemoryType } from '../schema.js'
 import { CONFIG_KEYS, EXTRACT_MODES } from '../memory-runtime.js'
-import type { ConfigKey, MemoryConfig } from '../memory-runtime.js'
+import type { ConfigKey, MemoryConfig, TeamStatus } from '../memory-runtime.js'
+import type { MemoryStats, UsageCounter } from '../stats.js'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 
 // ---- token ----
@@ -73,11 +74,13 @@ export function queryToken(rawUrl: string | undefined): string | undefined {
 // ---- 页面与 URL ----
 
 /** 面板页面。 */
-export type PanelPage = 'memory' | 'settings'
+export type PanelPage = 'memory' | 'status' | 'settings'
 
 /** 面板页面的路由路径(无尾斜杠)。 */
 export function panelPath(page: PanelPage): string {
-  return page === 'memory' ? '/memory' : '/memory/settings'
+  if (page === 'memory') return '/memory'
+  if (page === 'status') return '/memory/status'
+  return '/memory/settings'
 }
 
 /**
@@ -286,10 +289,74 @@ export function describeConfig(config: MemoryConfig): PanelConfigItem[] {
   return CONFIG_KEYS.map(key => ({ key, meta: PANEL_CONFIG_META[key], value: config[key] }))
 }
 
+/** 状态页的 team 状态一行。 */
+export interface DashboardTeamRow {
+  /** 项目根路径;空串表示「无项目」(内置 + 用户层)。 */
+  readonly root: string
+  /** 已预热节点数。 */
+  readonly nodes: number
+}
+
+/** 状态页的 LLM 调用消耗一行(按职责分类)。 */
+export interface DashboardUsageRow {
+  /** 职责分类(recall / extract / review)。 */
+  readonly label: string
+  /** 调用次数。 */
+  readonly calls: number
+  /** 累计输入 token。 */
+  readonly inputTokens: number
+  /** 累计输出 token。 */
+  readonly outputTokens: number
+  /** 累计缓存读 token。 */
+  readonly cacheReadTokens: number
+}
+
+/** 状态页的完整视图模型(status / stats / usage 三区,一次 RPC 取齐)。 */
+export interface DashboardDto {
+  /** 顶部:记忆 team 状态。 */
+  readonly status: {
+    /** 每节点容量上限(Kb)。 */
+    readonly maxNodeKb: number
+    /** 各 root 的已预热 team。 */
+    readonly teams: readonly DashboardTeamRow[]
+  }
+  /** 中部:记忆统计指标。 */
+  readonly stats: {
+    /** 总条目数。 */
+    readonly total: number
+    /** rules / lessons 条目数。 */
+    readonly rules: number
+    readonly lessons: number
+    /** global / user / project 层条目数。 */
+    readonly layers: { readonly global: number; readonly user: number; readonly project: number }
+    /** 按 domain 的条目数(按数量降序,只含非零项)。 */
+    readonly domains: readonly { readonly domain: string; readonly count: number }[]
+    /** 记忆文件数。 */
+    readonly files: number
+    /** jsonl 总字节。 */
+    readonly jsonlBytes: number
+    /** md 总字节。 */
+    readonly mdBytes: number
+    /** catalog 条目总数。 */
+    readonly catalogEntries: number
+  }
+  /** 正文:token 用量(静态上下文估算 + 动态 LLM 调用消耗)。 */
+  readonly usage: {
+    /** 预热 team 的静态上下文成本。 */
+    readonly warmTeams: { readonly nodes: number; readonly chars: number; readonly tokens: number }
+    /** system prompt 摘要的静态上下文成本。 */
+    readonly summary: { readonly chars: number; readonly tokens: number }
+    /** 本进程 LLM 调用消耗(按职责分类)。 */
+    readonly counters: readonly DashboardUsageRow[]
+  }
+}
+
 /** 面板 RPC 通道的注入依赖(纯接口,由 index.ts 闭包提供)。 */
 export interface PanelDeps {
   /** 按过滤条件列出可见记忆(带所在文件);实现须按 createdAt 降序返回。 */
   entries(cwd: string | undefined, filters: PanelFilters): PanelEntryRow[]
+  /** 状态页视图模型(status / stats / usage 一次取齐)。 */
+  dashboard(cwd: string | undefined): DashboardDto
   /** 当前配置的设置页描述。 */
   getConfig(): PanelConfigItem[]
   /** 写入配置补丁(经 settings scope 校验与 applyConfig),返回写入后的描述。 */
@@ -313,6 +380,12 @@ interface TokenPayload {
   acToken: string
 }
 
+/** `dashboard-get` 请求载荷(可选 cwd,同 entries 的缺省回退)。 */
+interface DashboardPayload {
+  acToken: string
+  cwd?: string
+}
+
 /** `config-set` 请求载荷。 */
 interface ConfigSetPayload {
   acToken: string
@@ -332,6 +405,11 @@ const ENTRIES_PAYLOAD: z<EntriesPayload> = z.object({
 
 const TOKEN_PAYLOAD: z<TokenPayload> = z.object({
   acToken: z.string().min(1).required(),
+})
+
+const DASHBOARD_PAYLOAD: z<DashboardPayload> = z.object({
+  acToken: z.string().min(1).required(),
+  cwd: z.string().min(1),
 })
 
 const CONFIG_SET_PAYLOAD: z<ConfigSetPayload> = z.object({
@@ -369,8 +447,9 @@ function panelError<T>(code: 'bad-request' | 'internal', message: string): RpcRe
 /**
  * 面板 RPC 分发:token 门 → 载荷校验 → 注入依赖调用。
  *
- * 端点:entries(列记忆,带过滤)/ config-get(读配置)/ config-set(写配置)。
- * 未知端点与非法载荷一律 bad-request;依赖抛错折叠为 internal。
+ * 端点:entries(列记忆,带过滤)/ dashboard-get(状态页视图模型)/ config-get
+ * (读配置)/ config-set(写配置)。未知端点与非法载荷一律 bad-request;依赖抛错
+ * 折叠为 internal。
  * @param endpoint - channel 相对端点。
  * @param payload - 客户端载荷(必须携带合法 acToken)。
  * @param token - 服务端持有的面板 token。
@@ -391,6 +470,12 @@ export async function handlePanelRpc(
         if (!parsed.ok) return panelError('bad-request', parsed.message)
         const { cwd, filters } = parsed.value
         return { ok: true, value: { entries: deps.entries(cwd, filters ?? {}) } }
+      }
+      case 'dashboard-get': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(DASHBOARD_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: { dashboard: deps.dashboard(parsed.value.cwd) } }
       }
       case 'config-get': {
         if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')

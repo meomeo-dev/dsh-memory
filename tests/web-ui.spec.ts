@@ -86,8 +86,10 @@ describe('panel token', () => {
 describe('panel URLs', () => {
   it('builds page paths and token-bearing URLs', () => {
     expect(panelPath('memory')).toBe('/memory')
+    expect(panelPath('status')).toBe('/memory/status')
     expect(panelPath('settings')).toBe('/memory/settings')
     expect(panelUrl(39140, 'memory', 'tok')).toBe('http://127.0.0.1:39140/memory?ac_token=tok')
+    expect(panelUrl(39140, 'status', 'tok')).toBe('http://127.0.0.1:39140/memory/status?ac_token=tok')
     expect(panelUrl(39140, 'settings', 'tok')).toBe('http://127.0.0.1:39140/memory/settings?ac_token=tok')
   })
 })
@@ -226,6 +228,42 @@ describe('handlePanelRpc', () => {
     const set = await handlePanelRpc('config-set', { acToken: token, patch: { maxNodeKb: 800 } }, token, setDeps)
     expect(set.ok).toBe(true)
     expect(patchSeen).toEqual({ maxNodeKb: 800 })
+  })
+
+  it('serves the dashboard view model through the deps', async () => {
+    let received: string | undefined
+    const deps = makeDeps({
+      dashboard: (cwd) => {
+        received = cwd
+        return {
+          status: { maxNodeKb: 600, teams: [{ root: '/proj', nodes: 3 }] },
+          stats: {
+            total: 2, rules: 1, lessons: 1,
+            layers: { global: 0, user: 1, project: 1 },
+            domains: [{ domain: 'Style', count: 2 }],
+            files: 1, jsonlBytes: 100, mdBytes: 200, catalogEntries: 2,
+          },
+          usage: {
+            warmTeams: { nodes: 3, chars: 1200, tokens: 300 },
+            summary: { chars: 400, tokens: 100 },
+            counters: [{ label: 'recall', calls: 2, inputTokens: 100, outputTokens: 50, cacheReadTokens: 25 }],
+          },
+        }
+      },
+    })
+    const result = await handlePanelRpc('dashboard-get', { acToken: token, cwd: '/proj' }, token, deps)
+    expect(result.ok).toBe(true)
+    expect(received).toBe('/proj')
+    if (result.ok) {
+      const value = result.value as { dashboard: { status: { teams: unknown[] }; stats: { total: number }; usage: { counters: unknown[] } } }
+      expect(value.dashboard.status.teams).toHaveLength(1)
+      expect(value.dashboard.stats.total).toBe(2)
+      expect(value.dashboard.usage.counters).toHaveLength(1)
+    }
+    // 缺省 cwd 透传 undefined(由注入实现做 process.cwd 回退)。
+    const noCwd = await handlePanelRpc('dashboard-get', { acToken: token }, token, deps)
+    expect(noCwd.ok).toBe(true)
+    expect(received).toBeUndefined()
   })
 
   it('folds dependency failures into an internal error', async () => {

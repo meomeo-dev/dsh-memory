@@ -5,7 +5,7 @@
 
 /** HTML 壳注入的引导数据(见 host 侧 renderPanelShell)。 */
 export interface Bootstrap {
-  readonly page: 'memory' | 'settings'
+  readonly page: 'memory' | 'status' | 'settings'
   readonly token: string
   readonly channel: string
 }
@@ -18,7 +18,7 @@ export function readBootstrap(): Bootstrap | undefined {
     const value = JSON.parse(el.textContent) as unknown
     if (typeof value !== 'object' || value === null) return undefined
     const { page, token, channel } = value as Record<string, unknown>
-    if ((page !== 'memory' && page !== 'settings') || typeof token !== 'string' || typeof channel !== 'string') {
+    if ((page !== 'memory' && page !== 'status' && page !== 'settings') || typeof token !== 'string' || typeof channel !== 'string') {
       return undefined
     }
     return { page, token, channel }
@@ -53,6 +53,36 @@ export interface Filters {
   readonly domain?: string
   readonly layer?: string
   readonly query?: string
+}
+
+/** 状态页视图模型(与 host 侧 DashboardDto 同构)。 */
+export interface Dashboard {
+  readonly status: {
+    readonly maxNodeKb: number
+    readonly teams: readonly { readonly root: string; readonly nodes: number }[]
+  }
+  readonly stats: {
+    readonly total: number
+    readonly rules: number
+    readonly lessons: number
+    readonly layers: { readonly global: number; readonly user: number; readonly project: number }
+    readonly domains: readonly { readonly domain: string; readonly count: number }[]
+    readonly files: number
+    readonly jsonlBytes: number
+    readonly mdBytes: number
+    readonly catalogEntries: number
+  }
+  readonly usage: {
+    readonly warmTeams: { readonly nodes: number; readonly chars: number; readonly tokens: number }
+    readonly summary: { readonly chars: number; readonly tokens: number }
+    readonly counters: readonly {
+      readonly label: string
+      readonly calls: number
+      readonly inputTokens: number
+      readonly outputTokens: number
+      readonly cacheReadTokens: number
+    }[]
+  }
 }
 
 /** 设置页配置项。 */
@@ -95,7 +125,7 @@ let rpcCounter = 0
  */
 export async function rpc<T>(
   bootstrap: Bootstrap,
-  endpoint: 'entries' | 'config-get' | 'config-set',
+  endpoint: 'entries' | 'dashboard-get' | 'config-get' | 'config-set',
   payload: Record<string, unknown> = {},
 ): Promise<T> {
   const rpcId = `panel-${++rpcCounter}`

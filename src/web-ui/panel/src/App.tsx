@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DISPLAY, readBootstrap, rpc } from './api'
-import type { Bootstrap, ConfigItem, EntryRow, Filters } from './api'
+import type { Bootstrap, ConfigItem, Dashboard, EntryRow, Filters } from './api'
 
 /** 渲染本地时间 `YYYY-MM-DD HH:mm:ss`。 */
 function formatTime(epochMs: number): string {
@@ -19,18 +19,47 @@ function dateKey(epochMs: number): string {
   return formatTime(epochMs).slice(0, 10)
 }
 
-/** 页面导航(两页互链,恒带 ac_token)。 */
-function Nav({ page, token }: { readonly page: 'memory' | 'settings'; readonly token: string }): JSX.Element {
-  const target = (next: 'memory' | 'settings') => next === page
+/** 大数紧凑化:>=1M → `1.2M`,>=1k → `3.4k`,否则千分位。 */
+function formatCompact(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return value.toLocaleString()
+}
+
+/** 字节数人类化(Kb / Mb,与 host 侧 renderBytes 同口径)。 */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Kb`
+  return `${(bytes / 1024 / 1024).toFixed(1)} Mb`
+}
+
+/** 面板页面(导航 tab 的恒等集合)。 */
+const PAGES = ['memory', 'status', 'settings'] as const
+
+const PAGE_LABELS: Readonly<Record<(typeof PAGES)[number], string>> = {
+  memory: '记忆 (Memory)',
+  status: '状态 (Status)',
+  settings: '设置 (Settings)',
+}
+
+const PAGE_PATHS: Readonly<Record<(typeof PAGES)[number], string>> = {
+  memory: '/memory',
+  status: '/memory/status',
+  settings: '/memory/settings',
+}
+
+/** 页面导航(三页互链,恒带 ac_token)。 */
+function Nav({ page, token }: { readonly page: Bootstrap['page']; readonly token: string }): JSX.Element {
+  const target = (next: Bootstrap['page']) => next === page
     ? undefined
-    : `${next === 'memory' ? '/memory' : '/memory/settings'}?ac_token=${encodeURIComponent(token)}`
+    : `${PAGE_PATHS[next]}?ac_token=${encodeURIComponent(token)}`
   return (
     <nav className="tabs">
-      {(['memory', 'settings'] as const).map(next => (
+      {PAGES.map(next => (
         <span key={next}>
           {target(next) === undefined
-            ? <span className="tab active">{next === 'memory' ? '记忆 (Memory)' : '设置 (Settings)'}</span>
-            : <a className="tab" href={target(next)}>{next === 'memory' ? '记忆 (Memory)' : '设置 (Settings)'}</a>}
+            ? <span className="tab active">{PAGE_LABELS[next]}</span>
+            : <a className="tab" href={target(next)}>{PAGE_LABELS[next]}</a>}
         </span>
       ))}
     </nav>
@@ -206,6 +235,243 @@ function MemoryPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JSX.Eleme
   )
 }
 
+// ---- 状态页 ----
+
+/** 图表配色(镜像 dsh 设计令牌:deepseek 蓝系 + amber,三个职责分类各一色)。 */
+const CHART_COLORS = {
+  recall: 'rgb(65, 118, 230)', // --dsw-static-deepseek-500
+  extract: 'rgb(103, 158, 254)', // --dsw-static-deepseek-400
+  review: 'rgb(245, 158, 11)', // --dsw-static-amber-500
+  input: 'rgb(65, 118, 230)',
+  output: 'rgb(103, 158, 254)',
+  cache: 'rgb(245, 158, 11)',
+  warm: 'rgb(65, 118, 230)',
+  summary: 'rgb(103, 158, 254)',
+} as const
+
+/** 纯 SVG 甜甜圈:各职责分类的 token 占比(无外部图表库)。 */
+function Donut({ segments }: { readonly segments: readonly { readonly label: string; readonly value: number; readonly color: string }[] }): JSX.Element {
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0)
+  const radius = 54
+  const circumference = 2 * Math.PI * radius
+  let accumulated = 0
+  return (
+    <div className="donut-wrap">
+      <svg viewBox="0 0 140 140" className="donut" role="img" aria-label="token 分布">
+        <circle cx="70" cy="70" r={radius} fill="none" stroke="var(--chart-track)" strokeWidth="14" />
+        {segments.map(segment => {
+          const fraction = total > 0 ? segment.value / total : 0
+          const dash = fraction * circumference
+          const arc = (
+            <circle key={segment.label} cx="70" cy="70" r={radius} fill="none"
+              stroke={segment.color} strokeWidth="14"
+              strokeDasharray={`${dash} ${circumference - dash}`}
+              strokeDashoffset={-accumulated}
+              transform="rotate(-90 70 70)" />
+          )
+          accumulated += dash
+          return arc
+        })}
+        <text x="70" y="66" textAnchor="middle" className="donut-center">{formatCompact(total)}</text>
+        <text x="70" y="82" textAnchor="middle" className="donut-sub">tokens</text>
+      </svg>
+      <div className="legend">
+        {segments.map(segment => (
+          <div className="legend-row" key={segment.label}>
+            <span className="legend-dot" style={{ background: segment.color }} />
+            <span className="legend-label">{segment.label}</span>
+            <span className="legend-value">{formatCompact(segment.value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** 水平堆叠条:每个职责分类的输入 / 输出 / 缓存读 token。 */
+function StackedBars({ rows }: { readonly rows: Dashboard['usage']['counters'] }): JSX.Element {
+  const maxTotal = Math.max(1, ...rows.map(row => row.inputTokens + row.outputTokens + row.cacheReadTokens))
+  const width = (value: number): string => `${(value / maxTotal) * 100}%`
+  return (
+    <div className="bars">
+      {rows.map(row => (
+        <div className="bar-row" key={row.label}>
+          <span className="bar-label">{row.label}</span>
+          <div className="bar-track">
+            <span className="bar-seg" style={{ width: width(row.inputTokens), background: CHART_COLORS.input }} title={`input ${row.inputTokens.toLocaleString()}`} />
+            <span className="bar-seg" style={{ width: width(row.outputTokens), background: CHART_COLORS.output }} title={`output ${row.outputTokens.toLocaleString()}`} />
+            <span className="bar-seg" style={{ width: width(row.cacheReadTokens), background: CHART_COLORS.cache }} title={`cacheRead ${row.cacheReadTokens.toLocaleString()}`} />
+          </div>
+          <span className="bar-total">
+            {formatCompact(row.inputTokens + row.outputTokens + row.cacheReadTokens)} tok · {row.calls} calls
+          </span>
+        </div>
+      ))}
+      <div className="legend">
+        {([['input', '输入 input'], ['output', '输出 output'], ['cache', '缓存读 cacheRead']] as const).map(([key, label]) => (
+          <div className="legend-row" key={key}>
+            <span className="legend-dot" style={{ background: CHART_COLORS[key] }} />
+            <span className="legend-label">{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** 水平对比条:静态上下文成本(预热 team vs system prompt 摘要)。 */
+function StaticBars({ usage }: { readonly usage: Dashboard['usage'] }): JSX.Element {
+  const max = Math.max(1, usage.warmTeams.tokens, usage.summary.tokens)
+  const width = (value: number): string => `${(value / max) * 100}%`
+  const rows = [
+    { label: `预热 team (${usage.warmTeams.nodes} nodes)`, tokens: usage.warmTeams.tokens, chars: usage.warmTeams.chars, color: CHART_COLORS.warm },
+    { label: 'system prompt 摘要', tokens: usage.summary.tokens, chars: usage.summary.chars, color: CHART_COLORS.summary },
+  ]
+  return (
+    <div className="bars">
+      {rows.map(row => (
+        <div className="bar-row" key={row.label}>
+          <span className="bar-label">{row.label}</span>
+          <div className="bar-track">
+            <span className="bar-seg" style={{ width: width(row.tokens), background: row.color }} />
+          </div>
+          <span className="bar-total">{formatCompact(row.tokens)} tok est. · {formatBytes(row.chars)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** 状态页:顶部 team 状态 → 中部统计指标块 → 正文 usage 图表。 */
+function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JSX.Element {
+  const [dashboard, setDashboard] = useState<Dashboard | undefined>(undefined)
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    rpc<{ dashboard: Dashboard }>(bootstrap, 'dashboard-get')
+      .then(value => { setDashboard(value.dashboard); setError(undefined) })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false))
+  }, [bootstrap])
+
+  useEffect(() => { load() }, [load])
+
+  if (loading) return <div className="page"><div className="empty">加载中 (Loading)…</div></div>
+  if (dashboard === undefined) {
+    return <div className="page"><div className="banner error">加载失败: {error}</div></div>
+  }
+
+  const { status, stats, usage } = dashboard
+  const metrics = [
+    { label: '总条目', value: stats.total.toLocaleString() },
+    { label: 'rules', value: stats.rules.toLocaleString() },
+    { label: 'lessons', value: stats.lessons.toLocaleString() },
+    { label: 'global 层', value: stats.layers.global.toLocaleString() },
+    { label: 'user 层', value: stats.layers.user.toLocaleString() },
+    { label: 'project 层', value: stats.layers.project.toLocaleString() },
+    { label: '有记忆的领域', value: stats.domains.length.toLocaleString() },
+    { label: '记忆文件', value: stats.files.toLocaleString() },
+    { label: 'jsonl 体积', value: formatBytes(stats.jsonlBytes) },
+    { label: 'md 体积', value: formatBytes(stats.mdBytes) },
+    { label: 'catalog 条目', value: stats.catalogEntries.toLocaleString() },
+  ]
+  const tokenSegments = usage.counters.map(counter => ({
+    label: counter.label,
+    value: counter.inputTokens + counter.outputTokens + counter.cacheReadTokens,
+    color: CHART_COLORS[counter.label as 'recall' | 'extract' | 'review'] ?? CHART_COLORS.recall,
+  }))
+  const totalCalls = usage.counters.reduce((sum, counter) => sum + counter.calls, 0)
+
+  return (
+    <div className="page">
+      <div className="status-head">
+        <span className="status-title">记忆状态与用量 (Status &amp; Usage)</span>
+        <button type="button" className="refresh" onClick={load}>刷新 (Refresh)</button>
+      </div>
+      {error !== undefined && <div className="banner error">刷新失败: {error}</div>}
+
+      {/* 顶部:team 状态 */}
+      <section className="card status-card">
+        <header>
+          <span className="section-title">Team 状态</span>
+          <span className="chip">maxNodeKb = {status.maxNodeKb}</span>
+        </header>
+        {status.teams.length === 0
+          ? <p className="meta">No warm memory team. maxNodeKb={status.maxNodeKb}</p>
+          : status.teams.map(team => (
+            <div className="team-row" key={team.root}>
+              <span className="mono team-root">{team.root === '' ? '(内置 + 用户层, no project)' : team.root}</span>
+              <span className="team-nodes">{team.nodes} node(s)</span>
+            </div>
+          ))}
+      </section>
+
+      {/* 中部:统计指标块 */}
+      <section className="metric-grid">
+        {metrics.map(metric => (
+          <div className="metric-card" key={metric.label}>
+            <span className="metric-value">{metric.value}</span>
+            <span className="metric-label">{metric.label}</span>
+          </div>
+        ))}
+      </section>
+
+      {/* 正文:usage 图表 */}
+      <section className="charts">
+        <div className="card chart-card">
+          <span className="section-title">Token 分布(按职责)</span>
+          {totalCalls === 0
+            ? <p className="meta">本进程尚无 LLM 调用 (recall / extract / review)。</p>
+            : <Donut segments={tokenSegments} />}
+        </div>
+        <div className="card chart-card">
+          <span className="section-title">LLM 调用消耗(输入 / 输出 / 缓存读)</span>
+          {totalCalls === 0
+            ? <p className="meta">本进程尚无 LLM 调用。</p>
+            : <StackedBars rows={usage.counters} />}
+        </div>
+        <div className="card chart-card">
+          <span className="section-title">静态上下文成本估算</span>
+          <StaticBars usage={usage} />
+        </div>
+      </section>
+
+      {/* usage 明细表 */}
+      <section className="card">
+        <span className="section-title">用量明细 (Usage)</span>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>职责</th>
+                <th>调用次数</th>
+                <th>输入 tokens</th>
+                <th>输出 tokens</th>
+                <th>缓存读 tokens</th>
+                <th>合计 tokens</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.counters.map(counter => (
+                <tr key={counter.label}>
+                  <td>{counter.label}</td>
+                  <td className="mono">{counter.calls.toLocaleString()}</td>
+                  <td className="mono">{counter.inputTokens.toLocaleString()}</td>
+                  <td className="mono">{counter.outputTokens.toLocaleString()}</td>
+                  <td className="mono">{counter.cacheReadTokens.toLocaleString()}</td>
+                  <td className="mono">{formatCompact(counter.inputTokens + counter.outputTokens + counter.cacheReadTokens)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 // ---- 设置页 ----
 
 /** 单个配置项的编辑控件(按 kind 出表单控件)。 */
@@ -330,7 +596,9 @@ export function App(): JSX.Element {
       </header>
       {bootstrap.page === 'memory'
         ? <MemoryPage bootstrap={bootstrap} />
-        : <SettingsPage bootstrap={bootstrap} />}
+        : bootstrap.page === 'status'
+          ? <StatusPage bootstrap={bootstrap} />
+          : <SettingsPage bootstrap={bootstrap} />}
     </div>
   )
 }

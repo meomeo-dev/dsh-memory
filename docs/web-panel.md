@@ -6,9 +6,9 @@
 
 | 项 | 值 |
 |---|---|
-| 页面 | `/memory`(记忆页)、`/memory/settings`(设置页) |
+| 页面 | `/memory`(记忆页)、`/memory/status`(状态页)、`/memory/settings`(设置页) |
 | 静态资源 | `/memory-assets/*`(panel.js / style.css,前缀路由) |
-| RPC | `/memory-api` channel(entries / config-get / config-set 三个端点) |
+| RPC | `/memory-api` channel(entries / dashboard-get / config-get / config-set 四个端点) |
 | 打开方式 | ① `/lmemory ui` 命令返回可点击链接(主入口);② 启动时经 harness logger 打印一行(web 模式下是否可见取决于 logger 接线) |
 
 URL 恒带 `ac_token`(每次进程启动用 crypto 随机重新生成,64 位 hex);token 不写盘、不跨进程复用。
@@ -30,6 +30,10 @@ GET  /memory-assets/<file>?ac_token=<t> → 静态资源(白名单后缀 .js/.cs
                                      单段文件名、拒绝 .. 与分隔符,防路径穿越)
 POST /memory-api/entries    { acToken, cwd?, filters?: { type?, domain?, layer?, query? } }
                             → { entries: [{ entry(含 createdAt), file }] },按 createdAt 降序
+POST /memory-api/dashboard-get { acToken, cwd? } → { dashboard: { status, stats, usage } }
+  状态页一次取齐的视图模型:team 状态(maxNodeKb + 各 root 节点数)、记忆统计
+  (总条目 / rules / lessons / 各层 / domain 分布 / 文件字节 / catalog)、token 用量
+  (预热 team 与摘要的估算 + 本进程 recall/extract/review 调用消耗)。
 POST /memory-api/config-get { acToken } → { config: [{ key, meta, value }] }(13 键,按 CONFIG_KEYS 顺序)
 POST /memory-api/config-set { acToken, patch } → 经 settings scope 校验并 applyConfig,返回写后 config
 ```
@@ -41,6 +45,7 @@ RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload
 ## 页面
 
 - **记忆页**:顶部筛选组件(全文搜索 entry/scope/domain + type/domain/layer 下拉 + 计数),正文区 Timeline / Table 两种布局切换。Timeline 按创建日期分组(降序),卡片含 type/domain/layer 徽标、条目文本、scope/file/entryPoint/references 溯源;Table 平铺全部 10 列。
+- **状态页**:三区结构——顶部 team 状态(各 root 的已预热节点数 + maxNodeKb chip)、中部统计指标块(总条目 / rules / lessons / 各层 / 领域数 / 文件 / jsonl 与 md 体积 / catalog,网格卡片)、正文 usage 图表。图表为纯 SVG/div(零外部图表库,满足 CSP `default-src 'none'`):token 分布甜甜圈(按职责)、LLM 调用消耗堆叠条(输入/输出/缓存读)、静态上下文成本对比条;下方附用量明细表。带「刷新」按钮重取 `dashboard-get`。
 - **设置页**:13 个配置键的表单,按 kind 出控件(number / boolean / enum / string / textarea),统一「保存」提交 config-set,成功/失败横幅反馈。键集合与展示元数据在 `src/web-ui/ui.ts` 的 `PANEL_CONFIG_META`(测试锁定与 `CONFIG_KEYS` 不漂移)。
 
 ## 代码组织与构建
