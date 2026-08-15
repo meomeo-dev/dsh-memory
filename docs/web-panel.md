@@ -36,7 +36,7 @@ POST /memory-api/config-set { acToken, patch } → 经 settings scope 校验并 
 
 RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload}` / `{type:"server-response",rpcId,result:{ok,value}}`;错误码只用 `bad-request`(载荷/token 非法)与 `internal`(依赖抛错)。
 
-面板只读 user/global 层记忆(浏览器没有项目 cwd;`cwd` 载荷字段保留给未来扩展)。Timeline 依赖的 `createdAt` 由 schema v2 提供(v1 旧数据由迁移 0002 按文件名日期回填,见 data-contract.md)。
+面板缺省显示「dsh web 进程启动目录」的项目层记忆 + 内置/用户层(`cwd` 载荷可显式指定其他项目)。Timeline 依赖的 `createdAt` 由 schema v2 提供(v1 旧数据由迁移 0002 按文件名日期回填,见 data-contract.md)。
 
 ## 页面
 

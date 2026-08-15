@@ -587,7 +587,10 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
   ctx.inject(['connection'], (cctx) => {
     const deps: PanelDeps = {
       entries(cwd, filters) {
-        const rows = find(cwd, {
+        // 浏览器没有项目上下文:缺省落在 dsh web 进程的启动目录,面板能看到
+        // 「启动所在项目」的项目层记忆 + 内置/用户层;cwd 载荷仍可显式指定。
+        const root = cwd ?? process.cwd()
+        const rows = find(root, {
           ...(filters.type !== undefined ? { type: filters.type } : {}),
           ...(filters.domain !== undefined ? { domain: filters.domain } : {}),
           ...(filters.layer !== undefined ? { layer: filters.layer } : {}),
