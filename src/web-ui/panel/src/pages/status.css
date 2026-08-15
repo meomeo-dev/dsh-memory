@@ -97,8 +97,10 @@
 }
 
 .activity-cell {
-  min-width: 20px;
-  max-width: 20px;
+  /* 固定格宽(非自适应):96 列必须统一对齐时间轴;24px 给 3 字符 9px 等宽留足余量
+     (实测 SF Mono 3 字符 ≈ 16px,留 ~8px 防字体回退变宽时静默裁剪)。 */
+  min-width: 24px;
+  max-width: 24px;
   height: 18px;
   font-family: var(--ds-font-family-code);
   font-size: 9px;
