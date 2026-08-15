@@ -1,0 +1,128 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import {
+  forgetRoot,
+  isMemoryRoot,
+  loadRegistry,
+  refreshRegistry,
+  registerExplicitRoot,
+  saveRegistry,
+  scanRoot,
+} from '../src/registry.js'
+import { memoryWriteRoots } from '../src/memory-file.js'
+
+let dshHome: string
+let agentsHome: string
+let project: string
+const saved = { dsh: process.env.DSH_HOME, agents: process.env.DSH_AGENTS_HOME }
+
+beforeEach(() => {
+  dshHome = mkdtempSync(join(tmpdir(), 'dsh-memory-reg-dsh-'))
+  agentsHome = mkdtempSync(join(tmpdir(), 'dsh-memory-reg-agents-'))
+  project = mkdtempSync(join(tmpdir(), 'dsh-memory-reg-proj-'))
+  process.env.DSH_HOME = dshHome
+  process.env.DSH_AGENTS_HOME = agentsHome
+})
+
+afterEach(() => {
+  rmSync(dshHome, { recursive: true, force: true })
+  rmSync(agentsHome, { recursive: true, force: true })
+  rmSync(project, { recursive: true, force: true })
+  if (saved.dsh === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = saved.dsh
+  if (saved.agents === undefined) delete process.env.DSH_AGENTS_HOME
+  else process.env.DSH_AGENTS_HOME = saved.agents
+})
+
+const NOW = 1750000000000
+
+function seedJsonl(dir: string, entries: number): void {
+  mkdirSync(dir, { recursive: true })
+  const rows = Array.from({ length: entries }, (_, i) =>
+    JSON.stringify({ id: `m-000000000${i}`, schemaVersion: 2, createdAt: NOW, type: 'rules', domain: 'Style', scope: '全项目', layer: 'user', entry: `条目 ${i}`, entryPoint: '-', references: '-' }))
+  writeFileSync(join(dir, '2026-08-13.rules.remember.jsonl'), `${rows.join('\n')}\n`, 'utf8')
+}
+
+describe('registry load/save', () => {
+  it('loads empty when the file is missing or corrupt', () => {
+    expect(loadRegistry().roots).toHaveLength(0)
+    saveRegistry({ formatVersion: 1, updatedAt: NOW, roots: [] })
+    expect(loadRegistry().roots).toHaveLength(0)
+    writeFileSync(join(dshHome, 'lmemory', 'registry.json'), '{not json', 'utf8')
+    expect(loadRegistry().roots).toHaveLength(0)
+  })
+
+  it('persists and re-reads roots round-trip', () => {
+    seedJsonl(join(dshHome, 'lmemory'), 1)
+    refreshRegistry(project, NOW)
+    const again = loadRegistry()
+    expect(again.formatVersion).toBe(1)
+    expect(again.roots.some(root => root.root === join(dshHome, 'lmemory'))).toBe(true)
+  })
+})
+
+describe('scanRoot / isMemoryRoot', () => {
+  it('counts entries and files, and recognizes memory roots', () => {
+    const dir = join(dshHome, 'lmemory')
+    expect(scanRoot(dir)).toEqual({ entries: 0, files: 0 })
+    expect(isMemoryRoot(dir)).toBe(false)
+    seedJsonl(dir, 3)
+    expect(scanRoot(dir)).toEqual({ entries: 3, files: 1 })
+    expect(isMemoryRoot(dir)).toBe(true)
+    const empty = join(dshHome, 'empty-root')
+    mkdirSync(empty)
+    expect(isMemoryRoot(empty)).toBe(true)
+  })
+})
+
+describe('refreshRegistry', () => {
+  it('registers fixed user roots that exist, and lazily registers project roots from cwd', () => {
+    seedJsonl(join(dshHome, 'lmemory'), 2)
+    seedJsonl(join(project, '.dsh', 'lmemory'), 4)
+
+    const registry = refreshRegistry(project, NOW)
+    const user = registry.roots.find(root => root.kind === 'user')!
+    expect(user.root).toBe(join(dshHome, 'lmemory'))
+    expect(user.entries).toBe(2)
+    expect(user.lastSeenAt).toBe(NOW)
+
+    const proj = registry.roots.find(root => root.kind === 'project')!
+    expect(proj.root).toBe(join(project, '.dsh', 'lmemory'))
+    expect(proj.entries).toBe(4)
+    expect(proj.firstSeenAt).toBe(NOW)
+  })
+
+  it('keeps historical roots with last-known counts when they disappear', () => {
+    seedJsonl(join(project, '.dsh', 'lmemory'), 4)
+    refreshRegistry(project, NOW)
+    // 项目根消失(目录删除)。
+    rmSync(join(project, '.dsh', 'lmemory'), { recursive: true, force: true })
+
+    const registry = refreshRegistry(undefined, NOW + 1000)
+    const proj = registry.roots.find(root => root.root === join(project, '.dsh', 'lmemory'))!
+    expect(proj.entries).toBe(4) // 最后已知计数保留。
+    expect(proj.lastSeenAt).toBe(NOW) // lastSeenAt 不更新。
+  })
+})
+
+describe('registerExplicitRoot / forgetRoot', () => {
+  it('adds an explicit root (project kind) and removes it without touching data', () => {
+    const root = join(project, '.dsh', 'lmemory')
+    seedJsonl(root, 1)
+    const registry = registerExplicitRoot(root, NOW)
+    expect(registry.roots.some(entry => entry.root === root && entry.kind === 'project')).toBe(true)
+
+    expect(forgetRoot(root, NOW + 1)).toBe(true)
+    expect(loadRegistry().roots.some(entry => entry.root === root)).toBe(false)
+    // 数据未动。
+    expect(existsSync(join(root, '2026-08-13.rules.remember.jsonl'))).toBe(true)
+    expect(forgetRoot(root, NOW + 2)).toBe(false)
+  })
+
+  it('classifies the fixed user roots as kind user', () => {
+    const registry = registerExplicitRoot(join(dshHome, 'lmemory'), NOW)
+    expect(registry.roots.find(entry => entry.root === join(dshHome, 'lmemory'))!.kind).toBe('user')
+  })
+})

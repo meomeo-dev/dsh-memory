@@ -20,7 +20,21 @@ describe('parseLmemoryCommand', () => {
   it('parses stats, usage, and ui', () => {
     expect(parseLmemoryCommand('stats')).toEqual({ kind: 'stats' })
     expect(parseLmemoryCommand('usage')).toEqual({ kind: 'usage' })
+    expect(parseLmemoryCommand('usage --days 14')).toEqual({ kind: 'usage', days: 14 })
+    expect(parseLmemoryCommand('usage --days bogus')).toEqual({ kind: 'usage' })
+    expect(parseLmemoryCommand('usage --days')).toEqual({ kind: 'usage' })
     expect(parseLmemoryCommand('ui')).toEqual({ kind: 'ui' })
+  })
+
+  it('parses collections list/add/forget/export', () => {
+    expect(parseLmemoryCommand('collections')).toEqual({ kind: 'collections', action: 'list' })
+    expect(parseLmemoryCommand('collections list')).toEqual({ kind: 'collections', action: 'list' })
+    expect(parseLmemoryCommand('collections add /path/to/lmemory')).toEqual({ kind: 'collections', action: 'add', root: '/path/to/lmemory' })
+    expect(parseLmemoryCommand('collections forget /path/to/lmemory')).toEqual({ kind: 'collections', action: 'forget', root: '/path/to/lmemory' })
+    expect(parseLmemoryCommand('collections export')).toEqual({ kind: 'collections', action: 'export' })
+    expect(parseLmemoryCommand('collections export --out ~/backup')).toEqual({ kind: 'collections', action: 'export', outDir: '~/backup' })
+    expect(parseLmemoryCommand('collections export --root /a --root /b')).toEqual({ kind: 'collections', action: 'export', roots: ['/a', '/b'] })
+    expect(parseLmemoryCommand('collections bogus')).toEqual({ kind: 'help' })
   })
 
   it('parses team start/stop/restart', () => {
@@ -96,8 +110,8 @@ describe('renderHelp', () => {
   })
 
   it('has a help entry for every parseable subcommand head', () => {
-    // status / stats / usage / ui / team / query / config / review / catalog / help 全部可查。
-    for (const topic of ['status', 'stats', 'usage', 'ui', 'team', 'query', 'config', 'review', 'catalog', 'help']) {
+    // status / stats / usage / ui / team / query / config / review / catalog / collections / help 全部可查。
+    for (const topic of ['status', 'stats', 'usage', 'ui', 'team', 'query', 'config', 'review', 'catalog', 'collections', 'help']) {
       expect(COMMAND_HELPS.has(topic)).toBe(true)
     }
   })

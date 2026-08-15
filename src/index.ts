@@ -16,6 +16,7 @@
  * @module @meomeo-dev/dsh-memory
  */
 
+import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -33,7 +34,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 
 import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
-import { renderSummary } from './render.js'
+import { formatCreatedAt, renderSummary } from './render.js'
 import { discoverEntries, migrateLegacyMemoryDirs, resolveRecalled } from './memory-file.js'
 import type { RecalledEntry } from './memory-file.js'
 import { append, find, rebuild, remove, removeByEntry, update } from './store.js'
@@ -74,6 +75,9 @@ import type { ExtractFn, TranscriptMessage } from './extract.js'
 import { computeStats, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.js'
 import type { UsageCounter } from './stats.js'
 import { COMMAND_HELPS, USAGE, parseLmemoryCommand, renderHelp } from './command.js'
+import { exportCollections } from './collections.js'
+import { forgetRoot, isMemoryRoot, loadRegistry, refreshRegistry, registerExplicitRoot } from './registry.js'
+import type { Registry } from './registry.js'
 import {
   PANEL_CHANNEL,
   assetContentType,
@@ -501,6 +505,19 @@ function renderUsage(runtime: Runtime, cwd: string | undefined): string {
   ].join('\n')
 }
 
+/** 渲染注册表(`/lmemory collections list`)。 */
+function renderRegistry(registry: Registry): string {
+  if (registry.roots.length === 0) {
+    return 'No registered memory roots. Roots register automatically on session start; or run /lmemory collections add <root> to register one.'
+  }
+  const lines = ['Memory collections (registered roots):']
+  for (const root of registry.roots) {
+    const seen = root.lastSeenAt > 0 ? formatCreatedAt(root.lastSeenAt) : 'never'
+    lines.push(`  [${root.kind}] ${root.root} — ${root.entries} entries, ${root.files} files (last seen ${seen})`)
+  }
+  return lines.join('\n')
+}
+
 /** 由配置对象渲染一行/全部配置。 */
 function renderConfig(config: MemoryConfig, key?: string): string {
   if (key !== undefined) {
@@ -756,6 +773,34 @@ async function handleCommand(
       case 'catalog': {
         rebuild(cwd)
         return { kind: 'success', text: 'catalog rebuilt from jsonl.' }
+      }
+      case 'collections': {
+        switch (command.action) {
+          case 'list':
+            return { kind: 'success', text: renderRegistry(refreshRegistry(cwd)) }
+          case 'add': {
+            const root = resolve(command.root ?? '')
+            if (!isMemoryRoot(root)) {
+              return { kind: 'error', text: `"${command.root}" does not exist or contains no memory files (use an lmemory dir with *.remember.jsonl or an empty dir).` }
+            }
+            return { kind: 'success', text: renderRegistry(registerExplicitRoot(root)) }
+          }
+          case 'forget': {
+            const removed = forgetRoot(resolve(command.root ?? ''))
+            if (!removed) return { kind: 'error', text: `No registered root matches "${command.root}".` }
+            return { kind: 'success', text: renderRegistry(loadRegistry()) }
+          }
+          case 'export': {
+            const result = exportCollections(cwd, {
+              ...(command.outDir !== undefined ? { outDir: command.outDir } : {}),
+              ...(command.roots !== undefined ? { roots: command.roots } : {}),
+            })
+            return { kind: 'success', text: `Exported ${result.rootsExported} root(s), ${result.totalEntries} entries -> ${result.dir}` }
+          }
+          /* v8 ignore next 2 -- closed union backstop */
+          default:
+            return { kind: 'error', text: USAGE }
+        }
       }
       /* v8 ignore next 2 -- closed union backstop */
       default:
@@ -1078,6 +1123,12 @@ export function apply(ctx: Context): void {
   const migration = migrateLegacyMemoryDirs()
   for (const moved of migration.moved) ctx.logger.info(`dsh-memory: migrated legacy memory dir ${moved} -> lmemory/`)
   for (const skipped of migration.skipped) ctx.logger.warn(`dsh-memory: ${skipped} does not look like a memory dir; leaving it untouched`)
+
+  // 注册表:启动登记用户根;每次会话开始登记项目根(惰性发现,docs/storage-and-collections.md §Q2)。
+  refreshRegistry()
+  ctx.on('agent/session-start', ({ agent }) => {
+    refreshRegistry(agent.session.header.cwd)
+  })
 
   // order 10:persona(0)之后、工具指导(100–199)之前,注入已知记忆摘要。
   ctx.systemPrompt.section({

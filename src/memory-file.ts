@@ -33,14 +33,14 @@ const DSH_HOME_ENV = 'DSH_HOME'
 /** agents home 环境变量覆盖(默认 `~/.agents`)。 */
 const AGENTS_HOME_ENV = 'DSH_AGENTS_HOME'
 
-/** 解析 dsh home。 */
-function dshHome(): string {
+/** 解析 dsh home(registry / usage 日志等 host 级文件也共用此解析)。 */
+export function dshHome(): string {
   const fromEnv = process.env[DSH_HOME_ENV]
   return resolve(fromEnv !== undefined && fromEnv.trim().length > 0 ? fromEnv : join(homedir(), '.dsh'))
 }
 
-/** 解析 agents home。 */
-function agentsHome(): string {
+/** 解析 agents home(同上,导出供跨模块复用)。 */
+export function agentsHome(): string {
   const fromEnv = process.env[AGENTS_HOME_ENV]
   return resolve(fromEnv !== undefined && fromEnv.trim().length > 0 ? fromEnv : join(homedir(), '.agents'))
 }

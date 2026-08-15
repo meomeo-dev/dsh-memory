@@ -1,8 +1,9 @@
 /**
  * `/lmemory` 命令的参数解析(纯函数)。
  *
- * 子命令:status / stats / usage / ui / team start|stop|restart / query <text> /
- * config get|set / review [layer|domain] / catalog rebuild / help。
+ * 子命令:status / stats / usage [--days N] / ui / team start|stop|restart /
+ * query <text> / config get|set / review [layer|domain] / catalog rebuild /
+ * collections list|add|forget|export / help。
  * 解析只做词法切分,不校验配置键语义(交给 index.ts 的 handler)。
  * @module dsh-memory/command
  */
@@ -20,7 +21,7 @@ export type LmemoryCommand =
   | { readonly kind: 'help'; readonly topic?: string }
   | { readonly kind: 'status' }
   | { readonly kind: 'stats' }
-  | { readonly kind: 'usage' }
+  | { readonly kind: 'usage'; readonly days?: number }
   | { readonly kind: 'ui' }
   | { readonly kind: 'team'; readonly action: 'start' | 'stop' | 'restart' }
   | { readonly kind: 'query'; readonly text: string }
@@ -28,9 +29,16 @@ export type LmemoryCommand =
   | { readonly kind: 'config-set'; readonly key: string; readonly value: string }
   | { readonly kind: 'review'; readonly filter?: ReviewFilter }
   | { readonly kind: 'catalog' }
+  | {
+    readonly kind: 'collections'
+    readonly action: 'list' | 'add' | 'forget' | 'export'
+    readonly root?: string
+    readonly outDir?: string
+    readonly roots?: readonly string[]
+  }
 
 /** 命令用法回显文案。 */
-export const USAGE = 'Usage: /lmemory status | stats | usage | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | help [command]'
+export const USAGE = 'Usage: /lmemory status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...] | help [command]'
 
 /** 一条子命令的帮助详情(供 `/lmemory help [command]`)。 */
 export interface CommandHelp {
@@ -61,11 +69,12 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
     ],
   }],
   ['usage', {
-    usage: 'usage',
-    summary: 'token 用量:预热 team 与 system prompt 摘要的上下文成本估算 + 本进程 LLM 调用消耗。',
+    usage: 'usage [--days N]',
+    summary: 'token 用量:实时视图 + 持久化日志的每日聚合。',
     details: [
-      '行为:静态部分按 chars/4 粗估;动态部分按 recall / extract / review 分类累计,仅本进程,重启归零。',
-      '示例:/lmemory usage',
+      '无参:预热 team 与 system prompt 摘要的上下文成本估算 + 本进程 LLM 调用消耗(重启归零)。',
+      '--days N(1..90):按 usage.jsonl 持久化日志聚合近 N 天,按 recall / extract / review 分类(重启不丢)。',
+      '示例:/lmemory usage --days 14',
     ],
   }],
   ['ui', {
@@ -104,8 +113,19 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
     usage: 'catalog rebuild',
     summary: '从全部 jsonl 重建 catalog(派生索引)。',
     details: [
-      '行为:全量重写每个 memory 目录的 catalog.json;真相源仍是 jsonl。',
+      '行为:全量重写每个 lmemory 目录的 catalog.json;真相源仍是 jsonl。',
       '示例:/lmemory catalog rebuild',
+    ],
+  }],
+  ['collections', {
+    usage: 'collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...]',
+    summary: '记忆根的整体管理与记忆包导出(注册表 + 备份分享)。',
+    details: [
+      'list:刷新并列出 host 上全部已登记记忆根(路径 / 类型 / 条目数 / 文件数 / 最近可见时间)。',
+      'add <root>:手动登记一个 lmemory 根(须含记忆文件或为空目录);forget <root>:从注册表移除(不动数据)。',
+      'export:把全部(或 --root 选定)记忆根合并导出到 --out(缺省 ~/dsh-memory-exports/),manifest.json + roots/ 直拷真相源。',
+      '示例:/lmemory collections list',
+      '示例:/lmemory collections export --out ~/memory-backup --root /Users/me/proj/.dsh/lmemory',
     ],
   }],
   ['config', {
@@ -154,7 +174,12 @@ export function parseLmemoryCommand(rawInput: string): LmemoryCommand {
   }
   if (head === 'status') return { kind: 'status' }
   if (head === 'stats') return { kind: 'stats' }
-  if (head === 'usage') return { kind: 'usage' }
+  if (head === 'usage') {
+    if (parts[1]?.toLowerCase() === '--days' && parts[2] !== undefined && /^\d+$/.test(parts[2])) {
+      return { kind: 'usage', days: Number(parts[2]) }
+    }
+    return { kind: 'usage' }
+  }
   if (head === 'ui') return { kind: 'ui' }
   if (head === 'team') {
     const action = parts[1]?.toLowerCase()
@@ -187,6 +212,28 @@ export function parseLmemoryCommand(rawInput: string): LmemoryCommand {
   }
   if (head === 'catalog' && parts[1]?.toLowerCase() === 'rebuild') {
     return { kind: 'catalog' }
+  }
+  if (head === 'collections') {
+    const action = parts[1]?.toLowerCase()
+    if (action === undefined || action === 'list') return { kind: 'collections', action: 'list' }
+    if (action === 'add' && parts[2] !== undefined) return { kind: 'collections', action: 'add', root: parts.slice(2).join(' ') }
+    if (action === 'forget' && parts[2] !== undefined) return { kind: 'collections', action: 'forget', root: parts.slice(2).join(' ') }
+    if (action === 'export') {
+      let outDir: string | undefined
+      const roots: string[] = []
+      for (let i = 2; i < parts.length; i++) {
+        const token = parts[i]!
+        if (token === '--out' && parts[i + 1] !== undefined) {
+          outDir = parts[i + 1]
+          i += 1
+        } else if (token === '--root' && parts[i + 1] !== undefined) {
+          roots.push(parts[i + 1]!)
+          i += 1
+        }
+      }
+      return { kind: 'collections', action: 'export', ...(outDir !== undefined ? { outDir } : {}), ...(roots.length > 0 ? { roots } : {}) }
+    }
+    return { kind: 'help' }
   }
   return { kind: 'help' }
 }
