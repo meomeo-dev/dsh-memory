@@ -248,17 +248,17 @@ function locate(cwd: string | undefined, id: MemoryId): {
 }
 
 /**
- * 写入一条新记忆:校验 + 生成 id + 去重 + 追加 JSONL + 重渲染 MD + 更新 catalog。
+ * 写入一条新记忆:校验 + 生成 id + 系统赋值 createdAt + 去重 + 追加 JSONL + 重渲染 MD + 更新 catalog。
  *
  * `rules` 只增不减(重复 `entry` 拒绝,返回 `duplicate: true` 不落盘);`lessons`
  * 单条 ≤300 字。写根由 `entry.layer` 决定(project → 项目根,否则用户根)。
  * @param cwd - 当前工作目录(用于解析写根与可见目录去重)。
- * @param candidate - 候选条目(无 `id`)。
+ * @param candidate - 候选条目(无 `id` / `createdAt`)。
  * @returns 落盘结果(含 id 与路径)或重复拒绝标记。
  * @throws 当 schema 校验失败、entry 空白、lessons 超长、或渲染 MD 未通过静态检查。
  */
 export function append(cwd: string, candidate: MemoryEntryInput): AppendResult {
-  const entry = validateEntry({ ...candidate, id: generateMemoryId(), schemaVersion: SCHEMA_VERSION })
+  const entry = validateEntry({ ...candidate, id: generateMemoryId(), schemaVersion: SCHEMA_VERSION, createdAt: Date.now() })
   assertEntryConstraints(entry)
   if (entry.type === 'rules') {
     const duplicate = loadAllMigrating(cwd).flatMap(file => file.entries)

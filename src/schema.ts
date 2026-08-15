@@ -57,7 +57,7 @@ export function generateMemoryId(): MemoryId {
   return `m-${suffix}` as MemoryId
 }
 
-/** 新建记忆的候选输入(无 `id`;`id` 由存储层生成,`entryPoint`/`references` 缺省 `-`)。 */
+/** 新建记忆的候选输入(无 `id` / `createdAt`;二者由存储层系统赋值,`entryPoint`/`references` 缺省 `-`)。 */
 export interface MemoryEntryInput {
   /** 记忆类型:偏好/约束,或经验教训。 */
   readonly type: MemoryType
@@ -76,9 +76,9 @@ export interface MemoryEntryInput {
 }
 
 /**
- * 8 列 Markdown 表格表头(首列 `id` + {@link MemoryEntry} 的 7 个字段:
- * type / domain / scope / layer / entry / entryPoint / references)。
- * 其中 domain 与 scope 是语义定位的正交对,layer 是存储元数据。
+ * 9 列 Markdown 表格表头(首列 `id` + {@link MemoryEntry} 的 8 个字段:
+ * type / domain / scope / layer / createdAt / entry / entryPoint / references)。
+ * 其中 domain 与 scope 是语义定位的正交对,layer 与 createdAt 是存储元数据。
  */
 export const TABLE_HEADER = [
   'id',
@@ -86,13 +86,14 @@ export const TABLE_HEADER = [
   '所属知识领域 (domain)',
   '影响范围 (Scope)',
   'Layer (落点层)',
+  '创建时间 (createdAt)',
   '条目',
   'entry point (file path)',
   'references (file path)',
 ] as const
 
-/** 8 列表格分隔行。 */
-export const TABLE_SEPARATOR = '|---|---|---|---|---|---|---|---|'
+/** 9 列表格分隔行。 */
+export const TABLE_SEPARATOR = '|---|---|---|---|---|---|---|---|---|'
 
 /** lessons 单条入口的字数上限(concept.md §5「偶尔合并,单条 ≤300 字」)。 */
 export const MAX_LESSON_CHARS = 300
@@ -111,9 +112,9 @@ function describeSchemaError(error: unknown): string {
 /**
  * 严格校验一条完整记录(JSONL 一行)。
  *
- * 只接受「完整合法记录」:`id` / `schemaVersion` 由 generated schema 的 required 强制,
- * 缺一即拒绝;`entryPoint` / `references` 缺省为 `-`。不在此处惰性补 `id`——id 补齐由
- * 存储层 `append` 显式生成、迁移引擎 {@link ./migrate.js} 负责。
+ * 只接受「完整合法记录」:`id` / `schemaVersion` / `createdAt` 由 generated schema 的
+ * required 强制,缺一即拒绝;`entryPoint` / `references` 缺省为 `-`。不在此处惰性补
+ * `id`——id 补齐由存储层 `append` 显式生成、迁移引擎 {@link ./migrate.js} 负责。
  * @param entry - 完整候选记录。
  * @param lineNumber - 可选行号,用于把错误定位到 JSONL 的某一行。
  * @returns 校验(并归一化)后的 {@link MemoryEntry}。

@@ -4,7 +4,7 @@ import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 
 /** schema 版本号(记录级,单调递增)。 */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export const MEMORY_TYPES = ["rules", "lessons"] as const
 export type MemoryType = (typeof MEMORY_TYPES)[number]
@@ -25,6 +25,7 @@ export const MEMORY_ID_RE = /^m-[0-9a-z]{10}$/
 export interface MemoryEntry {
   readonly id: MemoryId
   readonly schemaVersion: number
+  readonly createdAt: number
   readonly type: MemoryType
   readonly domain: DomainId
   readonly scope: string
@@ -37,7 +38,8 @@ export interface MemoryEntry {
 /** JSONL 记录 schema:逐行校验的数据契约(来自 schema.yaml)。 */
 export const MEMORY_ENTRY_SCHEMA: Schema<MemoryEntry> = z.object({
   id: z.string().pattern(MEMORY_ID_RE).required(),
-  schemaVersion: z.number().step(1).required(),
+  schemaVersion: z.number().step(1).min(1).required(),
+  createdAt: z.number().step(1).min(0).required(),
   type: z.union([...MEMORY_TYPES]).required(),
   domain: z.union([...DOMAINS]).required(),
   scope: z.string().min(1).required(),

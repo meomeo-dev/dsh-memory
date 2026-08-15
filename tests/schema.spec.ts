@@ -15,10 +15,14 @@ import {
 } from '../src/schema.js'
 import type { MemoryEntry } from '../src/schema.js'
 
+/** 固定创建时间,保证断言与 TZ 无关。 */
+const FIXED_CREATED_AT = 1750000000000
+
 function entry(overrides: Record<string, unknown> = {}): MemoryEntry {
   return {
     id: 'm-0000000000',
-    schemaVersion: 1,
+    schemaVersion: 2,
+    createdAt: FIXED_CREATED_AT,
     type: 'rules',
     domain: 'DurablePrefs',
     scope: '全项目',
@@ -44,10 +48,10 @@ describe('contract constants', () => {
     expect(LAYERS).toEqual(['global', 'user', 'project'])
   })
 
-  it('exposes the current schema version and an 8-column header and separator', () => {
-    expect(SCHEMA_VERSION).toBe(1)
-    expect(TABLE_HEADER).toHaveLength(8)
-    expect(TABLE_SEPARATOR).toBe('|---|---|---|---|---|---|---|---|')
+  it('exposes the current schema version and a 9-column header and separator', () => {
+    expect(SCHEMA_VERSION).toBe(2)
+    expect(TABLE_HEADER).toHaveLength(9)
+    expect(TABLE_SEPARATOR).toBe('|---|---|---|---|---|---|---|---|---|')
   })
 })
 
@@ -91,7 +95,8 @@ describe('validateEntry (strict)', () => {
     const result = validateEntry(entry())
     expect(result).toMatchObject({
       id: 'm-0000000000',
-      schemaVersion: 1,
+      schemaVersion: 2,
+      createdAt: FIXED_CREATED_AT,
       type: 'rules',
       domain: 'DurablePrefs',
       scope: '全项目',
@@ -110,6 +115,15 @@ describe('validateEntry (strict)', () => {
   it('rejects a record missing a schemaVersion', () => {
     const { schemaVersion: _version, ...rest } = entry()
     expect(() => validateEntry(rest)).toThrow(/schemaVersion/)
+  })
+
+  it('rejects a record missing a createdAt', () => {
+    const { createdAt: _createdAt, ...rest } = entry()
+    expect(() => validateEntry(rest)).toThrow(/createdAt/)
+  })
+
+  it('rejects a non-integer createdAt', () => {
+    expect(() => validateEntry(entry({ createdAt: 1.5 }))).toThrow(/createdAt|step|integer/i)
   })
 
   it('rejects an unknown type', () => {

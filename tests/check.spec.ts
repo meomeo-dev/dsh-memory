@@ -6,7 +6,8 @@ import type { MemoryEntry } from '../src/schema.js'
 function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     id: 'm-0000000000',
-    schemaVersion: 1,
+    schemaVersion: 2,
+    createdAt: 1750000000000,
     type: 'rules',
     domain: 'DurablePrefs',
     scope: '全项目',
@@ -28,31 +29,31 @@ describe('checkMarkdown', () => {
   })
 
   it('rejects a header with the wrong column count', () => {
-    const md = '| a | b |\n|---|---|---|---|---|---|---|---|\n| a | b | c | d | e | f | g | h |'
-    expect(checkMarkdown(md)).toContain('header row has 2 columns, expected 8')
+    const md = '| a | b |\n|---|---|---|---|---|---|---|---|---|\n| a | b | c | d | e | f | g | h | i |'
+    expect(checkMarkdown(md)).toContain('header row has 2 columns, expected 9')
   })
 
   it('rejects a separator row with a non-dash cell', () => {
-    const header = '| a | b | c | d | e | f | g | h |'
-    const md = `${header}\n|---|---|not|---|---|---|---|---|\n| a | b | c | d | e | f | g | h |`
+    const header = '| a | b | c | d | e | f | g | h | i |'
+    const md = `${header}\n|---|---|not|---|---|---|---|---|\n| a | b | c | d | e | f | g | h | i |`
     expect(checkMarkdown(md).some(e => e.includes('separator'))).toBe(true)
   })
 
   it('rejects a data row with a wrong column count', () => {
-    const header = '| a | b | c | d | e | f | g | h |'
-    const sep = '|---|---|---|---|---|---|---|---|'
-    const md = `${header}\n${sep}\n| a | b | c | d | e | f | g | h |\n| only | four | cells | here |`
+    const header = '| a | b | c | d | e | f | g | h | i |'
+    const sep = '|---|---|---|---|---|---|---|---|---|'
+    const md = `${header}\n${sep}\n| a | b | c | d | e | f | g | h | i |\n| only | four | cells | here |`
     expect(checkMarkdown(md).some(e => e.includes('data row 4'))).toBe(true)
   })
 
   it('rejects an unescaped pipe inside a data cell', () => {
-    const header = '| a | b | c | d | e | f | g | h |'
-    const sep = '|---|---|---|---|---|---|---|---|'
-    const md = `${header}\n${sep}\n| a | b | c | d | e | bad||pipe | f | g |`
+    const header = '| a | b | c | d | e | f | g | h | i |'
+    const sep = '|---|---|---|---|---|---|---|---|---|'
+    const md = `${header}\n${sep}\n| a | b | c | d | e | bad||pipe | f | g | h |`
     expect(checkMarkdown(md).some(e => e.includes('unescaped'))).toBe(true)
   })
 
   it('rejects a table without a separator row', () => {
-    expect(checkMarkdown('| a | b | c | d | e | f | g | h |')).toContain('table needs at least a header and a separator row')
+    expect(checkMarkdown('| a | b | c | d | e | f | g | h | i |')).toContain('table needs at least a header and a separator row')
   })
 })

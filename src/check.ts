@@ -1,14 +1,14 @@
 /**
  * Markdown 静态检查:渲染产物写盘前的最终守卫。
  *
- * 检查项:表头 8 列、分隔行 8 列、数据行每行列数与表头一致、无未闭合表格、
+ * 检查项:表头 9 列、分隔行 9 列、数据行每行列数与表头一致、无未闭合表格、
  * 单元格内 `|` 已转义。渲染产物不通过则拒绝写盘。纯函数,不 import cordis。
  *
  * @module dsh-memory/check
  */
 
-/** 表格应有的列数(首列 id + {@link MemoryEntry} 的 7 个字段)。 */
-const COLUMN_COUNT = 8
+/** 表格应有的列数(首列 id + {@link MemoryEntry} 的 8 个字段)。 */
+const COLUMN_COUNT = 9
 
 /** 管道符在给定下标是否被转义(前导反斜杠数为奇 = 已转义)。 */
 function isEscapedPipe(text: string, index: number): boolean {
@@ -20,7 +20,7 @@ function isEscapedPipe(text: string, index: number): boolean {
 /**
  * 把一行表格拆成单元格:去掉首尾 `|`,按未转义的 `|` 切分。
  * 渲染时单元格内的 `|` 已转义为 `\|`,故只有列分隔符是裸 `|`;残留的未转义
- * `|` 会把一行切出多于 7 列,由 {@link checkMarkdown} 报列数不一致。
+ * `|` 会把一行切出多于 8 列,由 {@link checkMarkdown} 报列数不一致。
  * @param line - 一行表格(含首尾 `|`)。
  * @returns 单元格数组(去首尾空白)。
  */

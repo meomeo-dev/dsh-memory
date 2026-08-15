@@ -11,6 +11,7 @@
  *   type: string + pattern     → z.string().pattern(<正则>)(字段名 id)
  *   type: string + minLength   → z.string().min(n)
  *   type: integer              → z.number().step(1)
+ *   minimum                    → .min(n)
  *   default                    → .default(v)
  *   required 列表中的字段        → .required()
  *
@@ -38,6 +39,7 @@ const ENUM_CONST = { type: 'MEMORY_TYPES', domain: 'DOMAINS', layer: 'LAYERS' }
 const FIELD_TYPE = {
   id: 'MemoryId',
   schemaVersion: 'number',
+  createdAt: 'number',
   type: 'MemoryType',
   domain: 'DomainId',
   scope: 'string',
@@ -61,6 +63,7 @@ function genField(name, prop) {
   } else {
     base = 'z.string()'
   }
+  if (prop.minimum !== undefined) base += `.min(${prop.minimum})`
   if (prop.default !== undefined) base += `.default(${JSON.stringify(prop.default)})`
   if (required.has(name)) base += '.required()'
   return base

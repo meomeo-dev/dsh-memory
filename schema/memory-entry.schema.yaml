@@ -2,10 +2,10 @@ $schema: "https://json-schema.org/draft/2020-12/schema"
 $id: "memory-entry"
 title: "MemoryEntry"
 description: "长期记忆条目(JSONL 一行)的数据契约。单一真相源:运行时 schemastery 校验器由 scripts/gen-schema.mjs 从本文件生成。"
-x-schema-version: 1
+x-schema-version: 2
 type: object
 additionalProperties: false
-required: [id, schemaVersion, type, domain, scope, layer, entry]
+required: [id, schemaVersion, createdAt, type, domain, scope, layer, entry]
 properties:
   id:
     type: string
@@ -15,6 +15,10 @@ properties:
     type: integer
     minimum: 1
     description: "schema 版本号(记录级,单调递增);旧数据缺省 0 由迁移引擎补齐"
+  createdAt:
+    type: integer
+    minimum: 0
+    description: "创建时间(epoch 毫秒,系统赋值);v1 旧数据由迁移 0002 按文件名日期回填"
   type:
     type: string
     enum: [rules, lessons]

@@ -14,14 +14,26 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { basename } from 'node:path'
 import { validateEntry } from './schema.js'
 import type { MemoryEntry } from './schema.generated.js'
 import { addIdAndVersion } from '../migrations/0001-add-id-and-version.js'
+import { addCreatedAt } from '../migrations/0002-add-created-at.js'
+import type { CreatedAtContext } from '../migrations/0002-add-created-at.js'
 
-/** 全部迁移,按版本号升序;每个迁移的 `up` 只做字段补全,不写 `schemaVersion`。 */
-const MIGRATIONS = [
+/** 单个迁移的注册项。 */
+interface Migration {
+  /** 迁移目标版本号(执行器按 `version > 当前` 判定是否应用)。 */
+  readonly version: number
+  /** 字段补全函数(只补字段,不写 `schemaVersion`,由执行器统一写回)。 */
+  readonly up: (record: Record<string, unknown>, context: CreatedAtContext) => Record<string, unknown>
+}
+
+/** 全部迁移,按版本号升序。 */
+const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: addIdAndVersion },
-] as const
+  { version: 2, up: addCreatedAt },
+]
 
 /** 由 schemastery 的 ValidationError 或 JSON 解析错误提取可读文本。 */
 function describeError(error: unknown): string {
@@ -32,17 +44,21 @@ function describeError(error: unknown): string {
  * 迁移单条记录:读 `schemaVersion`(缺省 0),依次应用 version > 当前的迁移,
  * 写回 `schemaVersion`,再严格校验。
  * @param raw - 任意来源(如 JSON.parse 产物)的候选记录。
+ * @param context - 迁移线索(如文件名日期);缺省只用当前时刻兜底。
  * @returns 迁移(或未迁移)后的合法条目与「是否发生了迁移」标记。
  * @throws 当迁移补全后仍不满足严格校验(数据损坏)。
  */
-export function migrateRecord(raw: unknown): { entry: MemoryEntry; migrated: boolean } {
+export function migrateRecord(raw: unknown, context: CreatedAtContext = { now: Date.now() }): {
+  entry: MemoryEntry
+  migrated: boolean
+} {
   const record = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
   const current = typeof record.schemaVersion === 'number' ? record.schemaVersion : 0
   let next = { ...record }
   let migrated = false
   for (const m of MIGRATIONS) {
     if (m.version <= current) continue
-    next = m.up(next)
+    next = m.up(next, context)
     next.schemaVersion = m.version
     migrated = true
   }
@@ -58,6 +74,7 @@ export function serializeEntry(entry: MemoryEntry): string {
   return JSON.stringify({
     id: entry.id,
     schemaVersion: entry.schemaVersion,
+    createdAt: entry.createdAt,
     type: entry.type,
     domain: entry.domain,
     scope: entry.scope,
@@ -82,6 +99,9 @@ export function readJsonlMigrating(jsonlPath: string): { entries: MemoryEntry[];
   if (!existsSync(jsonlPath)) return { entries: [], migrated: false }
   const text = readFileSync(jsonlPath, 'utf8')
   const lines = text.split('\n').filter(line => line.trim().length > 0)
+  // 文件名日期作为 createdAt 回填的第一线索(`YYYY-MM-DD[.<partition>]....jsonl` 前缀)。
+  const fileDate = /^(\d{4}-\d{2}-\d{2})/.exec(basename(jsonlPath))?.[1]
+  const context: CreatedAtContext = { fileDate, now: Date.now() }
   const entries: MemoryEntry[] = []
   let migrated = false
   for (let i = 0; i < lines.length; i++) {
@@ -91,7 +111,7 @@ export function readJsonlMigrating(jsonlPath: string): { entries: MemoryEntry[];
     } catch (error) {
       throw new Error(`remember.jsonl:${i + 1}: invalid JSON: ${describeError(error)}`)
     }
-    const result = migrateRecord(raw)
+    const result = migrateRecord(raw, context)
     entries.push(result.entry)
     if (result.migrated) migrated = true
   }

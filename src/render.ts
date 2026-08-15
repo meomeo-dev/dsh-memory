@@ -1,7 +1,7 @@
 /**
  * 长期记忆 JSONL → Markdown 投影的纯函数渲染。
  *
- * `.remember.md` 只是渲染投影(8 列 Markdown 表格:首列 id + 7 个字段),由本模块
+ * `.remember.md` 只是渲染投影(9 列 Markdown 表格:首列 id + 8 个字段),由本模块
  * 从归一化条目纯函数生成,绝不解析 Markdown。单元格内的 `|` 转义为 `\|`;system
  * prompt 注入用 {@link renderSummary} 只列条目文本,不注入整段历史。
  *
@@ -17,6 +17,17 @@ export function escapeCell(text: string): string {
 }
 
 /**
+ * 把 epoch 毫秒渲染为本地 `YYYY-MM-DD HH:mm:ss`(Markdown 投影的 createdAt 列,人读)。
+ * @param epochMs - 创建时间的 epoch 毫秒。
+ * @returns 本地时间字符串。
+ */
+export function formatCreatedAt(epochMs: number): string {
+  const d = new Date(epochMs)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/**
  * 一条记忆在节点文本里的一行:`[id|type|domain|scope] entry`。
  * recall 与 review 节点共用(召回按 id 去重并逆查补全,review 按 id 指认缺陷)。
  * @param entry - 归一化后的记忆条目。
@@ -26,7 +37,7 @@ export function entryLine(entry: MemoryEntry): string {
   return `[${entry.id}|${entry.type}|${entry.domain}|${entry.scope}] ${entry.entry}`
 }
 
-/** 渲染一条记忆为 8 列表格行(首列 id + 7 个字段,不含首尾换行)。 */
+/** 渲染一条记忆为 9 列表格行(首列 id + 8 个字段,不含首尾换行)。 */
 function renderRow(entry: MemoryEntry): string {
   const cells = [
     entry.id,
@@ -34,6 +45,7 @@ function renderRow(entry: MemoryEntry): string {
     entry.domain,
     entry.scope,
     entry.layer,
+    formatCreatedAt(entry.createdAt),
     escapeCell(entry.entry),
     escapeCell(entry.entryPoint),
     escapeCell(entry.references),
@@ -42,7 +54,7 @@ function renderRow(entry: MemoryEntry): string {
 }
 
 /**
- * 由归一化条目渲染 8 列 Markdown 表格(表头 + 分隔行 + 每行一条)。
+ * 由归一化条目渲染 9 列 Markdown 表格(表头 + 分隔行 + 每行一条)。
  * @param entries - 归一化后的记忆条目。
  * @returns 完整表格文本(末尾带一个换行)。
  */

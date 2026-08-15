@@ -68,7 +68,9 @@ describe('append', () => {
 
     const jsonl = readFileSync(result.jsonlPath!, 'utf8')
     expect(jsonl).toContain(`"id":"${result.entry.id}"`)
-    expect(jsonl).toContain('"schemaVersion":1')
+    expect(jsonl).toContain('"schemaVersion":2')
+    expect(jsonl).toContain(`"createdAt":${result.entry.createdAt}`)
+    expect(Number.isInteger(result.entry.createdAt)).toBe(true)
     expect(jsonl).toContain('"entry":"提交信息用 Conventional Commits"')
     expect(checkMarkdown(readFileSync(result.mdPath!, 'utf8'))).toEqual([])
 
@@ -205,8 +207,8 @@ describe('legacy migration + rebuild', () => {
     const found = find(project, { type: 'rules' })
     expect(found).toHaveLength(1)
     expect(isMemoryId(found[0]!.entry.id)).toBe(true)
-
-    // 补齐的 id 已落盘(惰性迁移持久化)。
+    // 补齐的 id / createdAt 已落盘(惰性迁移持久化);createdAt 按文件名日期回填(本地零点)。
+    expect(found[0]!.entry.createdAt).toBe(new Date(2026, 7, 13).getTime())
     expect(readAllJsonlLines(dir).join('\n')).toContain(`"id":"${found[0]!.entry.id}"`)
 
     rebuild(project)

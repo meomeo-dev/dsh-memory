@@ -62,7 +62,9 @@ describe('discoverEntries (migrating read of legacy rows)', () => {
     const first = discoverEntries(project)
     expect(first.map(e => e.entry)).toEqual(['两空格缩进'])
     expect(isMemoryId(first[0]!.id)).toBe(true)
-    expect(first[0]!.schemaVersion).toBe(1)
+    expect(first[0]!.schemaVersion).toBe(2)
+    // createdAt 按文件名日期回填(本地零点)。
+    expect(first[0]!.createdAt).toBe(new Date(2026, 7, 13).getTime())
 
     // 迁移已落盘,再次读取补出同一 id(而非每次读生成临时 id)。
     const second = discoverEntries(project)
@@ -76,7 +78,7 @@ describe('resolveRecalled', () => {
     mkdirSync(dir, { recursive: true })
     writeFileSync(
       join(dir, '2026-08-14.lessons.remember.jsonl'),
-      `${JSON.stringify({ id: 'm-0000000001', schemaVersion: 1, type: 'lessons', domain: 'PromotedPitfalls', scope: '样本库', layer: 'project', entry, entryPoint, references })}\n`,
+      `${JSON.stringify({ id: 'm-0000000001', schemaVersion: 2, createdAt: 1750000000000, type: 'lessons', domain: 'PromotedPitfalls', scope: '样本库', layer: 'project', entry, entryPoint, references })}\n`,
       'utf8',
     )
   }
@@ -123,7 +125,7 @@ describe('resolveRecalled', () => {
   it('preserves input order and resolves duplicates by id into distinct entries', () => {
     const dir = join(project, '.dsh', 'memory')
     mkdirSync(dir, { recursive: true })
-    const row = (id: string, entry: string) => `${JSON.stringify({ id, schemaVersion: 1, type: 'rules', domain: 'Style', scope: '全项目', layer: 'project', entry, entryPoint: '-', references: '-' })}\n`
+    const row = (id: string, entry: string) => `${JSON.stringify({ id, schemaVersion: 2, createdAt: 1750000000000, type: 'rules', domain: 'Style', scope: '全项目', layer: 'project', entry, entryPoint: '-', references: '-' })}\n`
     writeFileSync(
       join(dir, '2026-08-14.rules.remember.jsonl'),
       row('m-0000000001', '第一条') + row('m-0000000002', '第二条'),
@@ -147,13 +149,13 @@ describe('project-layer precedence', () => {
     const base = '2026-08-13.rules.remember'
     writeFileSync(
       join(userDir, `${base}.jsonl`),
-      '{"id":"m-0000000000","schemaVersion":1,"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"用户层条目","entryPoint":"-","references":"-"}\n',
+      '{"id":"m-0000000000","schemaVersion":2,"createdAt":1750000000000,"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"用户层条目","entryPoint":"-","references":"-"}\n',
       'utf8',
     )
     // 项目层同名文件覆盖。
     writeFileSync(
       join(project, '.dsh', 'memory', `${base}.jsonl`),
-      '{"id":"m-0000000001","schemaVersion":1,"type":"rules","domain":"Style","scope":"全项目","layer":"project","entry":"项目层条目","entryPoint":"-","references":"-"}\n',
+      '{"id":"m-0000000001","schemaVersion":2,"createdAt":1750000000000,"type":"rules","domain":"Style","scope":"全项目","layer":"project","entry":"项目层条目","entryPoint":"-","references":"-"}\n',
       'utf8',
     )
     const entries = discoverEntries(project)
