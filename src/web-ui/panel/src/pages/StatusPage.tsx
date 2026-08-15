@@ -205,14 +205,21 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
           ))}
         </div>
         <p className="meta">点击日期胶囊或上方每日用量图的某天,展开该天 24 小时二级明细表(两处选中态联动)。</p>
-        {selectedDay !== undefined && usage.hourly !== undefined && (
+        {usage.hourly !== undefined && (
           <div className="detail-wrap">
-            {/* 二级表控件头:高亮选中日期 + 收起按钮(明确的展开状态与关闭入口)。 */}
-            <div className="detail-head">
-              <span className="detail-title">▾ {selectedDay} 24 小时明细</span>
-              <button type="button" className="detail-close" onClick={() => setSelectedDay(undefined)}>收起 (Close)</button>
-            </div>
-            <div className="table-wrap">
+            {selectedDay === undefined
+              ? (
+                /* 二级空状态:未选择日期时恒显示,提示用户如何展开(不是空白区)。 */
+                <p className="empty">未选择日期 (No day selected) — 点击下方日期胶囊或上方每日用量图的某天,查看该天 24 小时明细。</p>
+              )
+              : (
+                <>
+                  {/* 二级表控件头:高亮选中日期 + 收起按钮(明确的展开状态与关闭入口)。 */}
+                  <div className="detail-head">
+                    <span className="detail-title">▾ {selectedDay} 24 小时明细</span>
+                    <button type="button" className="detail-close" onClick={() => setSelectedDay(undefined)}>收起 (Close)</button>
+                  </div>
+                  <div className="table-wrap">
               <table className="detail-table">
                 <thead>
                   <tr>
@@ -242,10 +249,12 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
                         {usage.costs !== undefined && <td className="mono">{hourCostText(bucket)}</td>}
                       </tr>
                     )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    })}
+                  </tbody>
+                </table>
+                  </div>
+                </>
+              )}
           </div>
         )}
         {usage.costs !== undefined && (
