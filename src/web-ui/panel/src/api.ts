@@ -103,8 +103,9 @@ export interface Dashboard {
     }[]
     /** 近 84 天按日聚合(升序,零填充)。 */
     readonly daily: readonly DayUsage[]
-    /** 近 14 天估算成本(即时计算、不落盘;缺价职责 yuan 缺省)。 */
-    readonly costs: {
+    /** 近 14 天估算成本(即时计算、不落盘;缺价职责 yuan 缺省)。
+     *  可选字段:旧 host 进程(未重启)不返回该字段,面板须优雅降级而不白屏。 */
+    readonly costs?: {
       readonly perLabel: readonly { readonly label: string; readonly calls: number; readonly yuan?: number; readonly missingPricingRows: number }[]
       readonly totalYuan: number
       readonly incomplete: boolean
