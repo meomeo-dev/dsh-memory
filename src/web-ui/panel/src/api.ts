@@ -5,7 +5,7 @@
 
 /** HTML 壳注入的引导数据(见 host 侧 renderPanelShell)。 */
 export interface Bootstrap {
-  readonly page: 'memory' | 'status' | 'settings'
+  readonly page: 'memory' | 'status' | 'collections' | 'settings'
   readonly token: string
   readonly channel: string
 }
@@ -18,7 +18,7 @@ export function readBootstrap(): Bootstrap | undefined {
     const value = JSON.parse(el.textContent) as unknown
     if (typeof value !== 'object' || value === null) return undefined
     const { page, token, channel } = value as Record<string, unknown>
-    if ((page !== 'memory' && page !== 'status' && page !== 'settings') || typeof token !== 'string' || typeof channel !== 'string') {
+    if ((page !== 'memory' && page !== 'status' && page !== 'collections' && page !== 'settings') || typeof token !== 'string' || typeof channel !== 'string') {
       return undefined
     }
     return { page, token, channel }
@@ -105,6 +105,28 @@ export interface Dashboard {
   }
 }
 
+/** 目录页一个记忆根的行(镜像 host 侧 RootRow)。 */
+export interface RootRow {
+  readonly root: string
+  readonly kind: 'user' | 'project'
+  readonly firstSeenAt: number
+  readonly lastSeenAt: number
+  readonly entries: number
+  readonly files: number
+  readonly exists: boolean
+  readonly filesDetail: readonly { readonly file: string; readonly entries: number }[]
+}
+
+/** 目录页视图模型(镜像 host 侧 RootsView)。 */
+export interface RootsView {
+  readonly roots: readonly RootRow[]
+  readonly summary: {
+    readonly roots: number
+    readonly totalEntries: number
+    readonly totalFiles: number
+  }
+}
+
 /** 设置页配置项。 */
 export interface ConfigItem {
   readonly key: string
@@ -145,7 +167,7 @@ let rpcCounter = 0
  */
 export async function rpc<T>(
   bootstrap: Bootstrap,
-  endpoint: 'entries' | 'dashboard-get' | 'config-get' | 'config-set',
+  endpoint: 'entries' | 'dashboard-get' | 'roots-get' | 'root-add' | 'root-forget' | 'root-export' | 'config-get' | 'config-set',
   payload: Record<string, unknown> = {},
 ): Promise<T> {
   const rpcId = `panel-${++rpcCounter}`

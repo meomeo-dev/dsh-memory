@@ -74,12 +74,13 @@ export function queryToken(rawUrl: string | undefined): string | undefined {
 // ---- 页面与 URL ----
 
 /** 面板页面。 */
-export type PanelPage = 'memory' | 'status' | 'settings'
+export type PanelPage = 'memory' | 'status' | 'collections' | 'settings'
 
 /** 面板页面的路由路径(无尾斜杠)。 */
 export function panelPath(page: PanelPage): string {
   if (page === 'memory') return '/memory'
   if (page === 'status') return '/memory/status'
+  if (page === 'collections') return '/memory/collections'
   return '/memory/settings'
 }
 
@@ -375,12 +376,60 @@ export interface DashboardDto {
   }
 }
 
+/** 目录页一个根的文件级明细行。 */
+export interface RootFileRow {
+  /** `.remember.jsonl` 文件名。 */
+  readonly file: string
+  /** 该文件条目数。 */
+  readonly entries: number
+}
+
+/** 目录页一个记忆根的行(registry 条目 + 存活状态 + 文件明细)。 */
+export interface RootRow {
+  /** 根目录绝对路径。 */
+  readonly root: string
+  /** 根类型:user / project。 */
+  readonly kind: 'user' | 'project'
+  /** 首次登记时间(epoch 毫秒)。 */
+  readonly firstSeenAt: number
+  /** 最近一次刷新时间(epoch 毫秒)。 */
+  readonly lastSeenAt: number
+  /** 最近已知条目数。 */
+  readonly entries: number
+  /** 最近已知文件数。 */
+  readonly files: number
+  /** 目录当前是否存在。 */
+  readonly exists: boolean
+  /** 文件级明细(目录存在时新鲜扫描;消失时为空)。 */
+  readonly filesDetail: readonly RootFileRow[]
+}
+
+/** 目录页视图模型(全部根 + 汇总)。 */
+export interface RootsView {
+  /** 全部已登记根。 */
+  readonly roots: readonly RootRow[]
+  /** 汇总:根数 / 总条目 / 总文件(按最近已知计数)。 */
+  readonly summary: {
+    readonly roots: number
+    readonly totalEntries: number
+    readonly totalFiles: number
+  }
+}
+
 /** 面板 RPC 通道的注入依赖(纯接口,由 index.ts 闭包提供)。 */
 export interface PanelDeps {
   /** 按过滤条件列出可见记忆(带所在文件);实现须按 createdAt 降序返回。 */
   entries(cwd: string | undefined, filters: PanelFilters): PanelEntryRow[]
   /** 状态页视图模型(status / stats / usage 一次取齐)。 */
   dashboard(cwd: string | undefined): DashboardDto
+  /** 目录页视图模型(全部已登记根 + 文件明细)。 */
+  roots(): RootsView
+  /** 手动登记一个根;非法路径由实现抛错(折叠为 internal)。 */
+  addRoot(root: string): RootsView
+  /** 从注册表移除一个根的登记(不动磁盘);未命中由实现抛错。 */
+  forgetRoot(root: string): RootsView
+  /** 导出全部(或单个)根到默认导出目录,返回产物信息。 */
+  exportRoots(root: string | undefined): { dir: string; totalEntries: number; rootsExported: number }
   /** 当前配置的设置页描述。 */
   getConfig(): PanelConfigItem[]
   /** 写入配置补丁(经 settings scope 校验与 applyConfig),返回写入后的描述。 */
@@ -410,6 +459,18 @@ interface DashboardPayload {
   cwd?: string
 }
 
+/** `root-add` / `root-forget` 请求载荷。 */
+interface RootPathPayload {
+  acToken: string
+  root: string
+}
+
+/** `root-export` 请求载荷(root 缺省 = 全部)。 */
+interface RootExportPayload {
+  acToken: string
+  root?: string
+}
+
 /** `config-set` 请求载荷。 */
 interface ConfigSetPayload {
   acToken: string
@@ -434,6 +495,16 @@ const TOKEN_PAYLOAD: z<TokenPayload> = z.object({
 const DASHBOARD_PAYLOAD: z<DashboardPayload> = z.object({
   acToken: z.string().min(1).required(),
   cwd: z.string().min(1),
+})
+
+const ROOT_PATH_PAYLOAD: z<RootPathPayload> = z.object({
+  acToken: z.string().min(1).required(),
+  root: z.string().min(1).required(),
+})
+
+const ROOT_EXPORT_PAYLOAD: z<RootExportPayload> = z.object({
+  acToken: z.string().min(1).required(),
+  root: z.string().min(1),
 })
 
 const CONFIG_SET_PAYLOAD: z<ConfigSetPayload> = z.object({
@@ -471,7 +542,8 @@ function panelError<T>(code: 'bad-request' | 'internal', message: string): RpcRe
 /**
  * 面板 RPC 分发:token 门 → 载荷校验 → 注入依赖调用。
  *
- * 端点:entries(列记忆,带过滤)/ dashboard-get(状态页视图模型)/ config-get
+ * 端点:entries(列记忆,带过滤)/ dashboard-get(状态页视图模型)/ roots-get
+ * (目录页视图)/ root-add / root-forget / root-export(目录页管理)/ config-get
  * (读配置)/ config-set(写配置)。未知端点与非法载荷一律 bad-request;依赖抛错
  * 折叠为 internal。
  * @param endpoint - channel 相对端点。
@@ -500,6 +572,30 @@ export async function handlePanelRpc(
         const parsed = parsePayload(DASHBOARD_PAYLOAD, payload)
         if (!parsed.ok) return panelError('bad-request', parsed.message)
         return { ok: true, value: { dashboard: deps.dashboard(parsed.value.cwd) } }
+      }
+      case 'roots-get': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(TOKEN_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: { roots: deps.roots() } }
+      }
+      case 'root-add': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(ROOT_PATH_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: { roots: deps.addRoot(parsed.value.root) } }
+      }
+      case 'root-forget': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(ROOT_PATH_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: { roots: deps.forgetRoot(parsed.value.root) } }
+      }
+      case 'root-export': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(ROOT_EXPORT_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: { export: deps.exportRoots(parsed.value.root) } }
       }
       case 'config-get': {
         if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')

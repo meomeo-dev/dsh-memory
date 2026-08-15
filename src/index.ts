@@ -16,6 +16,7 @@
  * @module @meomeo-dev/dsh-memory
  */
 
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -78,7 +79,7 @@ import { aggregateByDay, appendUsageRow, readUsageRows } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
 import { COMMAND_HELPS, USAGE, parseLmemoryCommand, renderHelp } from './command.js'
 import { exportCollections } from './collections.js'
-import { forgetRoot, isMemoryRoot, loadRegistry, refreshRegistry, registerExplicitRoot } from './registry.js'
+import { forgetRoot, isMemoryRoot, loadRegistry, refreshRegistry, registerExplicitRoot, scanRootDetail } from './registry.js'
 import type { Registry } from './registry.js'
 import {
   PANEL_CHANNEL,
@@ -593,6 +594,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
 
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory', handler: servePage('memory') }), 'dsh-memory: /memory page')
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/status', handler: servePage('status') }), 'dsh-memory: /memory/status page')
+  ctx.effect(() => web.register({ kind: 'exact', path: '/memory/collections', handler: servePage('collections') }), 'dsh-memory: /memory/collections page')
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/settings', handler: servePage('settings') }), 'dsh-memory: /memory/settings page')
   ctx.effect(() => web.register({
     kind: 'prefix',
@@ -682,6 +684,47 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
             daily: aggregateByDay(readUsageRows(), 84),
           },
         }
+      },
+      roots() {
+        // 目录页视图:registry 条目 + 存活状态 + 文件级明细(目录存在时新鲜扫描)。
+        const registry = loadRegistry()
+        const roots = registry.roots.map(entry => {
+          const alive = existsSync(entry.root)
+          const detail = scanRootDetail(entry.root)
+          return {
+            ...entry,
+            exists: alive,
+            filesDetail: detail.filesDetail,
+            entries: alive ? detail.entries : entry.entries,
+            files: alive ? detail.files : entry.files,
+          }
+        })
+        return {
+          roots,
+          summary: {
+            roots: roots.length,
+            totalEntries: roots.reduce((sum, root) => sum + root.entries, 0),
+            totalFiles: roots.reduce((sum, root) => sum + root.files, 0),
+          },
+        }
+      },
+      addRoot(path) {
+        const root = resolve(path)
+        if (!isMemoryRoot(root)) {
+          throw new Error(`"${path}" does not exist or contains no memory files (use an lmemory dir with *.remember.jsonl or an empty dir).`)
+        }
+        registerExplicitRoot(root)
+        return deps.roots()
+      },
+      forgetRoot(path) {
+        if (!forgetRoot(resolve(path))) {
+          throw new Error(`No registered root matches "${path}".`)
+        }
+        return deps.roots()
+      },
+      exportRoots(root) {
+        // 面板导出固定落默认导出目录(避免任意路径写面);CLI 的 --out 保持自由。
+        return exportCollections(undefined, root === undefined ? {} : { roots: [resolve(root)] })
       },
       getConfig() {
         return describeConfig(runtime.config)

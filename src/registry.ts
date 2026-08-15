@@ -99,16 +99,33 @@ export function saveRegistry(registry: Registry): void {
   renameSync(tmp, path)
 }
 
+/** 根扫描明细:条目数、文件数与每个 jsonl 文件的条目数(目录页文件级明细用)。 */
+export interface RootScanDetail {
+  /** 总条目数。 */
+  readonly entries: number
+  /** 记忆文件数。 */
+  readonly files: number
+  /** 每个 `.remember.jsonl` 的文件名与条目数(按名排序)。 */
+  readonly filesDetail: readonly { readonly file: string; readonly entries: number }[]
+}
+
+/** 扫描一个记忆根目录(只读;目录不存在返回 0/0 与空明细)。 */
+export function scanRootDetail(dir: string): RootScanDetail {
+  if (!existsSync(dir)) return { entries: 0, files: 0, filesDetail: [] }
+  let entries = 0
+  const filesDetail: { file: string; entries: number }[] = []
+  for (const name of readdirSync(dir).sort()) {
+    if (!name.endsWith('.remember.jsonl')) continue
+    const count = readJsonlMigrating(join(dir, name)).entries.length
+    entries += count
+    filesDetail.push({ file: name, entries: count })
+  }
+  return { entries, files: filesDetail.length, filesDetail }
+}
+
 /** 扫描一个记忆根目录的条目数与文件数(只读;目录不存在返回 0/0)。 */
 export function scanRoot(dir: string): { entries: number; files: number } {
-  if (!existsSync(dir)) return { entries: 0, files: 0 }
-  let entries = 0
-  let files = 0
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith('.remember.jsonl')) continue
-    files += 1
-    entries += readJsonlMigrating(join(dir, name)).entries.length
-  }
+  const { entries, files } = scanRootDetail(dir)
   return { entries, files }
 }
 

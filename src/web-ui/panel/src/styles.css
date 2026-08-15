@@ -579,6 +579,13 @@ button.primary:disabled {
   gap: 12px;
 }
 
+/* 整行大图(每日用量 / 日历热力图),不与三列小图混排。 */
+.charts-wide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .chart-card {
   display: flex;
   flex-direction: column;
@@ -676,6 +683,115 @@ button.primary:disabled {
   font-size: 12px;
   color: var(--dsw-alias-label-caption);
   font-variant-numeric: tabular-nums;
+}
+
+/* 紧凑水平条形图(整行大图):日期 | 条 | 总 token,单行一项。 */
+.hbars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hbar-label {
+  flex: 0 0 44px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.hbar-track {
+  flex: 1 1 auto;
+  display: flex;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--dsw-static-neutral-bluish-75);
+  overflow: hidden;
+}
+
+.hbar-seg {
+  display: block;
+  height: 100%;
+  transition: width var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.hbar-metric {
+  flex: 0 0 56px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 目录页。 */
+.add-root {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.add-root-row {
+  display: flex;
+  gap: 8px;
+}
+
+.add-root-input {
+  flex: 1 1 auto;
+}
+
+.root-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.root-card header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.root-path {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary);
+}
+
+.state-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.state-dot.ok {
+  background: var(--dsw-static-green-500);
+}
+
+.state-dot.gone {
+  background: var(--dsw-alias-label-caption);
+}
+
+.root-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.refresh.danger {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.refresh.danger:hover {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
 }
 
 /* 日历热力图(列=周,行=周一..周日)。 */

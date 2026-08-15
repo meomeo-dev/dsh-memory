@@ -39,8 +39,13 @@ function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 }
 
 function makeDeps(overrides: Partial<PanelDeps> = {}): PanelDeps {
+  const emptyView = { roots: [], summary: { roots: 0, totalEntries: 0, totalFiles: 0 } }
   return {
     entries: () => [],
+    roots: () => emptyView,
+    addRoot: () => emptyView,
+    forgetRoot: () => emptyView,
+    exportRoots: () => ({ dir: '/out/x', totalEntries: 0, rootsExported: 0 }),
     getConfig: () => describeConfig(DEFAULT_CONFIG),
     setConfig: async () => describeConfig(DEFAULT_CONFIG),
     ...overrides,
@@ -87,9 +92,11 @@ describe('panel URLs', () => {
   it('builds page paths and token-bearing URLs', () => {
     expect(panelPath('memory')).toBe('/memory')
     expect(panelPath('status')).toBe('/memory/status')
+    expect(panelPath('collections')).toBe('/memory/collections')
     expect(panelPath('settings')).toBe('/memory/settings')
     expect(panelUrl(39140, 'memory', 'tok')).toBe('http://127.0.0.1:39140/memory?ac_token=tok')
     expect(panelUrl(39140, 'status', 'tok')).toBe('http://127.0.0.1:39140/memory/status?ac_token=tok')
+    expect(panelUrl(39140, 'collections', 'tok')).toBe('http://127.0.0.1:39140/memory/collections?ac_token=tok')
     expect(panelUrl(39140, 'settings', 'tok')).toBe('http://127.0.0.1:39140/memory/settings?ac_token=tok')
   })
 })
@@ -276,5 +283,45 @@ describe('handlePanelRpc', () => {
       expect(result.error.code).toBe('internal')
       expect(result.error.message).toBe('disk gone')
     }
+  })
+
+  it('serves the collections endpoints (roots-get / root-add / root-forget / root-export)', async () => {
+    const view = {
+      roots: [{ root: '/a', kind: 'project', firstSeenAt: 1, lastSeenAt: 2, entries: 3, files: 1, exists: true, filesDetail: [{ file: 'x.remember.jsonl', entries: 3 }] }],
+      summary: { roots: 1, totalEntries: 3, totalFiles: 1 },
+    }
+    const calls: string[] = []
+    const deps = makeDeps({
+      roots: () => { calls.push('roots'); return view },
+      addRoot: (root) => { calls.push(`add:${root}`); return view },
+      forgetRoot: (root) => { calls.push(`forget:${root}`); return view },
+      exportRoots: (root) => { calls.push(`export:${root ?? '*'}`); return { dir: '/out/x', totalEntries: 3, rootsExported: 1 } },
+    })
+
+    const get = await handlePanelRpc('roots-get', { acToken: token }, token, deps)
+    expect(get.ok).toBe(true)
+    if (get.ok) expect((get.value as { roots: typeof view }).roots.summary.totalEntries).toBe(3)
+    expect(calls).toEqual(['roots'])
+
+    const add = await handlePanelRpc('root-add', { acToken: token, root: '/a' }, token, deps)
+    expect(add.ok).toBe(true)
+    expect(calls).toContain('add:/a')
+
+    const forget = await handlePanelRpc('root-forget', { acToken: token, root: '/a' }, token, deps)
+    expect(forget.ok).toBe(true)
+    expect(calls).toContain('forget:/a')
+
+    const exportAll = await handlePanelRpc('root-export', { acToken: token }, token, deps)
+    expect(exportAll.ok).toBe(true)
+    expect(calls).toContain('export:*')
+    const exportOne = await handlePanelRpc('root-export', { acToken: token, root: '/a' }, token, deps)
+    expect(exportOne.ok).toBe(true)
+    expect(calls).toContain('export:/a')
+
+    // 载荷校验:root 为空一律 bad-request;token 门同样生效。
+    const badAdd = await handlePanelRpc('root-add', { acToken: token, root: '' }, token, deps)
+    expect(badAdd.ok).toBe(false)
+    const noToken = await handlePanelRpc('roots-get', {}, token, deps)
+    expect(noToken.ok).toBe(false)
   })
 })
