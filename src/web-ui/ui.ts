@@ -376,6 +376,13 @@ export interface DashboardDto {
     readonly totals: readonly DashboardUsageRow[]
     /** 近 84 天按日聚合(usage.jsonl,零填充,升序;柱状图取后 14 天,热力图用全部)。 */
     readonly daily: readonly DashboardDaily[]
+    /** 近 14 天估算成本(即时计算、不落盘,见 docs/pricing-and-cost.md;价格表损坏时带 error)。 */
+    readonly costs: {
+      readonly perLabel: readonly { readonly label: string; readonly calls: number; readonly yuan?: number; readonly missingPricingRows: number }[]
+      readonly totalYuan: number
+      readonly incomplete: boolean
+      readonly error?: string
+    }
   }
 }
 

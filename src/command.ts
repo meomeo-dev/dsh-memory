@@ -3,7 +3,7 @@
  *
  * 子命令:status / stats / usage [--days N] / ui / team start|stop|restart /
  * query <text> / config get|set / review [layer|domain] / catalog rebuild /
- * collections list|add|forget|export / help。
+ * collections list|add|forget|export / pricing / help。
  * 解析只做词法切分,不校验配置键语义(交给 index.ts 的 handler)。
  * @module dsh-memory/command
  */
@@ -29,6 +29,7 @@ export type LmemoryCommand =
   | { readonly kind: 'config-set'; readonly key: string; readonly value: string }
   | { readonly kind: 'review'; readonly filter?: ReviewFilter }
   | { readonly kind: 'catalog' }
+  | { readonly kind: 'pricing' }
   | {
     readonly kind: 'collections'
     readonly action: 'list' | 'add' | 'forget' | 'export'
@@ -38,7 +39,7 @@ export type LmemoryCommand =
   }
 
 /** 命令用法回显文案。 */
-export const USAGE = 'Usage: /lmemory status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...] | help [command]'
+export const USAGE = 'Usage: /lmemory status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...] | pricing | help [command]'
 
 /** 一条子命令的帮助详情(供 `/lmemory help [command]`)。 */
 export interface CommandHelp {
@@ -115,6 +116,15 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
     details: [
       '行为:全量重写全部可见层(内置 + 用户 + 当前项目)的 catalog.json;真相源仍是 jsonl。',
       '示例:/lmemory catalog rebuild',
+    ],
+  }],
+  ['pricing', {
+    usage: 'pricing',
+    summary: '打印价格表全文与文件路径(成本估算的计价依据,CNY 每百万 tokens)。',
+    details: [
+      '行为:列出每个模型每个生效时段的价格(含峰谷价与来源);成本不落盘,改表后自动重算。',
+      '价格表: ~/.dsh/lmemory/pricing.json(缺失时用内置种子创建;损坏时报错)。',
+      '示例:/lmemory pricing',
     ],
   }],
   ['collections', {
@@ -212,6 +222,9 @@ export function parseLmemoryCommand(rawInput: string): LmemoryCommand {
   }
   if (head === 'catalog' && parts[1]?.toLowerCase() === 'rebuild') {
     return { kind: 'catalog' }
+  }
+  if (head === 'pricing' && parts.length === 1) {
+    return { kind: 'pricing' }
   }
   if (head === 'collections') {
     const action = parts[1]?.toLowerCase()

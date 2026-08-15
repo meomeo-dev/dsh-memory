@@ -78,6 +78,7 @@ import { computeStats, computeStatsIn, EMPTY_USAGE, estimateTokens, recordUsage 
 import type { UsageCounter } from './stats.js'
 import { aggregateByDay, aggregateWindowTotals, appendUsageRow, readUsageRows } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
+import { costFor, estimateWindowCosts, loadPricing, pricingPath } from './pricing.js'
 import {
   RUNTIME_HEARTBEAT_MS,
   beginNode,
@@ -255,6 +256,8 @@ async function callFlash(
           inputTokens: chunk.usage.inputTokens,
           outputTokens: chunk.usage.outputTokens,
           cacheReadTokens: chunk.usage.cacheReadTokens ?? 0,
+          // 计价键:成本估算按行携带的模型 id 查价(旧行无此字段,读取端按 label 回退)。
+          model,
         }
       } else if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
         throw new Error(`memory recall call failed: ${chunk.reason.failure.message}`)
@@ -594,7 +597,7 @@ function renderUsageDaily(rows: readonly UsageLogRow[], days: number): string {
   return lines.join('\n')
 }
 
-/** 渲染 token 用量(`/lmemory usage`):静态上下文成本估算 + 动态 LLM 调用消耗。 */
+/** 渲染 token 用量(`/lmemory usage`):静态上下文成本估算 + 动态 LLM 调用消耗 + 本进程估算成本。 */
 function renderUsage(runtime: Runtime): string {
   let nodeChars = 0
   let nodeCount = 0
@@ -610,12 +613,31 @@ function renderUsage(runtime: Runtime): string {
     const counter = runtime.usage.get(label) ?? EMPTY_USAGE
     return `    ${label}: ${counter.calls} call(s) — input ${counter.inputTokens.toLocaleString()} / output ${counter.outputTokens.toLocaleString()} / cacheRead ${counter.cacheReadTokens.toLocaleString()}`
   })
+  // 本进程估算成本:即时计算、不落盘(docs/pricing-and-cost.md)。usage 行恒带 model
+  // (本进程),无回退问题;价格表损坏/缺模型时显式说明,不静默为 0。
+  const pricing = loadPricing()
+  let costLine = '  estimated cost (CNY): pricing table unavailable or invalid'
+  if (pricing.ok) {
+    let yuan = 0
+    let missing = 0
+    for (const [label, counter] of runtime.usage) {
+      const model = label === 'review' ? runtime.config.reviewModel : runtime.config.model
+      // 本进程计数是「至今累计」,按当前价格估算(近似;历史精确值在状态页按行计)。
+      const cost = costFor(pricing.table, model, Date.now(), counter.inputTokens, counter.outputTokens, counter.cacheReadTokens)
+      if (cost === undefined) missing += 1
+      else yuan += cost
+    }
+    costLine = missing === 0
+      ? `  estimated cost (CNY): ¥${yuan.toFixed(2)}`
+      : `  estimated cost (CNY): ¥${yuan.toFixed(2)} (${missing} label(s) missing pricing)`
+  }
   return [
     'Memory token usage:',
     `  warm team: ${nodeCount} node(s), ${renderBytes(nodeChars)} text (~${estimateTokens(nodeChars).toLocaleString()} tokens est.)`,
     `  system-prompt summary: ${renderBytes(summaryChars)} (~${estimateTokens(summaryChars).toLocaleString()} tokens est.)`,
     '  LLM calls (this process):',
     ...callLines,
+    costLine,
   ].join('\n')
 }
 
@@ -629,6 +651,21 @@ function renderRegistry(registry: Registry): string {
     const seen = root.lastSeenAt > 0 ? formatCreatedAt(root.lastSeenAt) : 'never'
     lines.push(`  [${root.kind}] ${root.root} — ${root.entries} entries, ${root.files} files (last seen ${seen})`)
   }
+  return lines.join('\n')
+}
+
+/** 渲染价格表(`/lmemory pricing`):全文 + 文件路径(用户改表后自检)。 */
+function renderPricing(pricing: ReturnType<typeof loadPricing>): string {
+  if (!pricing.ok) return `Pricing table unavailable: ${pricing.error}`
+  const lines = [`Pricing table (CNY per 1M tokens, ${pricingPath()}):`]
+  for (const period of pricing.table.periods) {
+    const from = period.effectiveFrom === 0 ? 'earliest usage' : formatCreatedAt(period.effectiveFrom)
+    const prices = (p: { readonly inputPerMTok: number; readonly cacheHitPerMTok: number; readonly outputPerMTok: number }): string =>
+      `input ${p.inputPerMTok} / cacheHit ${p.cacheHitPerMTok} / output ${p.outputPerMTok}`
+    lines.push(`  [${period.model}] from ${from}: ${prices(period.prices)}${period.peakPrices !== undefined ? ` | peak ${prices(period.peakPrices)}` : ''}`)
+    lines.push(`      source: ${period.source}`)
+  }
+  lines.push('  edit this file to add/correct periods; cost recomputes from usage on every read.')
   return lines.join('\n')
 }
 
@@ -747,7 +784,12 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
         // 消耗口径(docs/status-page-usage.md):totals 与 daily 同源 usage.jsonl——
         // totals 是近 14 天窗口聚合(甜甜圈/堆叠条/明细表),daily 是 84 天日聚合
         // (每日图/热力图);warmTeams/summary 是本进程实时装载,标题已标注范围。
+        // costs 即时估算(docs/pricing-and-cost.md):价格表唯一持久化事实,cost 不落盘。
         const usageRows = readUsageRows()
+        const pricing = loadPricing()
+        const costs = pricing.ok
+          ? estimateWindowCosts(pricing.table, usageRows, 14, label => label === 'review' ? runtime.config.reviewModel : runtime.config.model)
+          : { perLabel: [], totalYuan: 0, incomplete: false, error: pricing.error }
         return {
           status: {
             maxNodeKb: runtime.config.maxNodeKb,
@@ -771,6 +813,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
             summary: { chars: summaryChars, tokens: estimateTokens(summaryChars) },
             totals: aggregateWindowTotals(usageRows, 14).map(({ label, calls, inputTokens, outputTokens, cacheReadTokens }) => ({ label, calls, inputTokens, outputTokens, cacheReadTokens })),
             daily: aggregateByDay(usageRows, 84),
+            costs,
           },
         }
       },
@@ -951,6 +994,9 @@ async function handleCommand(
       case 'catalog': {
         rebuild(cwd)
         return { kind: 'success', text: 'catalog rebuilt from jsonl.' }
+      }
+      case 'pricing': {
+        return { kind: 'success', text: renderPricing(loadPricing()) }
       }
       case 'collections': {
         switch (command.action) {
@@ -1351,8 +1397,8 @@ export function apply(ctx: Context): void {
 
     ctx.commands.register({
       name: 'lmemory',
-      description: 'manage long-term memory (status / stats / usage / ui / team / query / config / review / catalog / collections)',
-      input: { hint: 'status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | collections list|add|forget|export | help [command]' },
+      description: 'manage long-term memory (status / stats / usage / ui / team / query / config / review / catalog / collections / pricing)',
+      input: { hint: 'status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | collections list|add|forget|export | pricing | help [command]' },
       handler: invocation => handleCommand(ctx, runtime, scope, invocation),
     })
 

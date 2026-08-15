@@ -27,6 +27,8 @@ export interface UsageLogRow {
   readonly outputTokens: number
   /** 缓存读 token。 */
   readonly cacheReadTokens: number
+  /** 调用所用模型 id(成本估算计价键;旧行缺省,读取端按 label 回退)。 */
+  readonly model?: string
 }
 
 /** 某一天某一职责的聚合。 */
@@ -90,10 +92,17 @@ export function readUsageRows(): UsageLogRow[] {
     try {
       const parsed = JSON.parse(line) as unknown
       if (typeof parsed !== 'object' || parsed === null) continue
-      const { ts, label, inputTokens, outputTokens, cacheReadTokens } = parsed as Record<string, unknown>
+      const { ts, label, inputTokens, outputTokens, cacheReadTokens, model } = parsed as Record<string, unknown>
       if (typeof ts !== 'number' || (label !== 'recall' && label !== 'extract' && label !== 'review')) continue
       if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number') continue
-      rows.push({ ts, label, inputTokens, outputTokens, cacheReadTokens: typeof cacheReadTokens === 'number' ? cacheReadTokens : 0 })
+      rows.push({
+        ts,
+        label,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens: typeof cacheReadTokens === 'number' ? cacheReadTokens : 0,
+        ...(typeof model === 'string' ? { model } : {}),
+      })
     } catch {
       // 坏行跳过。
     }

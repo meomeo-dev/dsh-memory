@@ -116,7 +116,8 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
         </div>
       </section>
 
-      {/* usage 明细表(近 14 天窗口,与上方消耗图同源)。 */}
+      {/* usage 明细表(近 14 天窗口,与上方消耗图同源);估算成本即时计算、不落盘,
+          价格表随时可改,成本自动重算(docs/pricing-and-cost.md)。 */}
       <section className="card">
         <span className="section-title">用量明细 (Usage, 近 14 天)</span>
         <div className="table-wrap">
@@ -129,22 +130,41 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
                 <th>输出 tokens</th>
                 <th>缓存读 tokens</th>
                 <th>合计 tokens</th>
+                <th>估算成本 (¥)</th>
               </tr>
             </thead>
             <tbody>
-              {usage.totals.map(counter => (
-                <tr key={counter.label}>
-                  <td>{counter.label}</td>
-                  <td className="mono">{counter.calls.toLocaleString()}</td>
-                  <td className="mono">{counter.inputTokens.toLocaleString()}</td>
-                  <td className="mono">{counter.outputTokens.toLocaleString()}</td>
-                  <td className="mono">{counter.cacheReadTokens.toLocaleString()}</td>
-                  <td className="mono">{formatCompact(counter.inputTokens + counter.outputTokens + counter.cacheReadTokens)}</td>
-                </tr>
-              ))}
+              {usage.totals.map(counter => {
+                const costRow = usage.costs.perLabel.find(row => row.label === counter.label)
+                return (
+                  <tr key={counter.label}>
+                    <td>{counter.label}</td>
+                    <td className="mono">{counter.calls.toLocaleString()}</td>
+                    <td className="mono">{counter.inputTokens.toLocaleString()}</td>
+                    <td className="mono">{counter.outputTokens.toLocaleString()}</td>
+                    <td className="mono">{counter.cacheReadTokens.toLocaleString()}</td>
+                    <td className="mono">{formatCompact(counter.inputTokens + counter.outputTokens + counter.cacheReadTokens)}</td>
+                    <td className="mono">
+                      {usage.costs.error !== undefined
+                        ? '—(价格表不可用)'
+                        : costRow?.yuan !== undefined
+                          ? costRow.yuan.toFixed(2)
+                          : costRow !== undefined && costRow.missingPricingRows > 0
+                            ? `—(缺价 ${costRow.missingPricingRows} 行)`
+                            : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
+        <p className="meta">
+          近 14 天估算成本合计:{usage.costs.error !== undefined
+            ? `价格表不可用 (${usage.costs.error})`
+            : `¥${usage.costs.totalYuan.toFixed(2)}${usage.costs.incomplete ? '(部分职责缺价,未计入)' : ''}`}
+          · 依据 ~/.dsh/lmemory/pricing.json,改表即重算,成本不落盘
+        </p>
       </section>
     </div>
   )

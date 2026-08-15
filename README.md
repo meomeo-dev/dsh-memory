@@ -40,9 +40,10 @@ dsh --profile demo
 - `/lmemory catalog rebuild` —— 从全部 jsonl 重建 catalog
 - `/lmemory config get|set <key> [value]` —— 读写配置(见 `docs/design.md` §9 / `docs/auto-extraction.md` §7)
 - `/lmemory collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...]` —— 记忆根注册表管理与记忆包导出(备份/分享)
+- `/lmemory pricing` —— 打印价格表全文与文件路径(成本估算的计价依据,CNY 每百万 tokens;改表即重算,见 `docs/pricing-and-cost.md`)
 - `/lmemory ui` —— 返回记忆 Web 面板全部页面链接(记忆/状态/目录/节点/设置,带访问 token;仅 web 模式可用,见 `docs/web-panel.md`)
 
-Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链接(启动时也会打印面板 URL 到 stdout,与 `dsh web:` 行一致);面板含五个页面——记忆页(顶部筛选 + Timeline/Table 布局切换)、状态页(team 状态 + 统计指标块 + usage 图表,含近 14 天每日柱状图与近 12 周日历热力图)、目录页(记忆根注册表 + 登记/移除/导出)、节点状态页(跨进程 recall/extract/review 运行与装载状态,见 `docs/node-status.md`)、设置页(13 个配置键)。
+Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链接(启动时也会打印面板 URL 到 stdout,与 `dsh web:` 行一致);面板含五个页面——记忆页(顶部筛选 + Timeline/Table 布局切换)、状态页(team 状态 + 统计指标块 + usage 图表,含近 14 天每日柱状图、近 12 周日历热力图与按价格表的估算成本列)、目录页(记忆根注册表 + 登记/移除/导出)、节点状态页(跨进程 recall/extract/review 运行与装载状态,见 `docs/node-status.md`)、设置页(13 个配置键)。
 
 ## 存储模型
 
@@ -62,6 +63,7 @@ Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链
 - [robustness.md](docs/robustness.md) —— 健壮性设计:节点容错、LLM 停机语义
 - [web-panel.md](docs/web-panel.md) —— Web 面板设计:路由、token、信任栅栏、RPC 端点、构建管线
 - [storage-and-collections.md](docs/storage-and-collections.md) —— 存储目录改名、整体注册表、记忆包导出、usage 持久化
+- [pricing-and-cost.md](docs/pricing-and-cost.md) —— 价格表与成本估算:官方时段价格(含峰谷)持久化,cost 即时计算不落盘
 
 ## 状态
 

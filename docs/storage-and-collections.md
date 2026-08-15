@@ -100,9 +100,12 @@ roots/<nn>/<YYYY-MM-DD[.p].<type>.remember.md
 ### 追加日志
 
 ```jsonl
-{"ts":1786100000000,"label":"recall","inputTokens":1200,"outputTokens":300,"cacheReadTokens":0}
-{"ts":1786100000000,"label":"extract","inputTokens":800,"outputTokens":150,"cacheReadTokens":0}
+{"ts":1786100000000,"label":"recall","model":"deepseek-v4-flash","inputTokens":1200,"outputTokens":300,"cacheReadTokens":0}
+{"ts":1786100000000,"label":"extract","model":"deepseek-v4-flash","inputTokens":800,"outputTokens":150,"cacheReadTokens":0}
 ```
+
+- **`model` 字段**:该次调用所用模型 id(成本估算的计价键,见 docs/pricing-and-cost.md);
+  早期行缺省,读取端按 label 回退当前配置映射。
 
 - **写入点**:`callFlash` 在一次调用结束(成功或失败)时把该调用的 usage 聚合为
   一行 appendFileSync——同一代码路径覆盖 recall/extract/review 三类,进程内计数器
