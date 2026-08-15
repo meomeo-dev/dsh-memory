@@ -56,3 +56,77 @@
   flex-direction: column;
   gap: 14px;
 }
+
+/* 记忆活动大表(近 24h × 15min):固定格宽横向滚动 + sticky 标签列 + 小时刻度行。 */
+.activity-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.activity-table {
+  width: max-content;
+  border-collapse: collapse;
+}
+
+.activity-table th,
+.activity-table td {
+  padding: 0;
+  border: none;
+  white-space: nowrap;
+}
+
+.activity-table thead th {
+  font-size: 10px;
+  color: var(--dsw-alias-label-caption);
+  text-align: center;
+  vertical-align: bottom;
+}
+
+.activity-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--dsw-alias-bg-layer-2);
+  text-align: left !important;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  padding: 1px 8px 1px 0 !important;
+  min-width: 128px;
+  max-width: 128px;
+}
+
+.activity-cell {
+  min-width: 20px;
+  max-width: 20px;
+  height: 18px;
+  font-family: var(--ds-font-family-code);
+  font-size: 9px;
+  text-align: center;
+  border: 1px solid var(--dsw-alias-bg-module-platform) !important;
+  overflow: hidden;
+}
+
+.activity-cell.level-0 {
+  background: var(--heat-0);
+}
+
+.activity-cell.level-1 {
+  background: var(--heat-1);
+}
+
+.activity-cell.level-2 {
+  background: var(--heat-2);
+  color: var(--dsw-static-neutral-bluish-00);
+}
+
+.activity-cell.level-3 {
+  background: var(--heat-3);
+  color: var(--dsw-static-neutral-bluish-00);
+}
+
+.activity-cell.level-4 {
+  background: var(--heat-4);
+  color: var(--dsw-static-neutral-bluish-00);
+  font-weight: 600;
+}

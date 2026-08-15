@@ -43,7 +43,7 @@ dsh --profile demo
 - `/lmemory pricing` —— 打印价格表全文与文件路径(成本估算的计价依据,CNY 每百万 tokens;改表即重算,见 `docs/pricing-and-cost.md`)
 - `/lmemory ui` —— 返回记忆 Web 面板全部页面链接(记忆/状态/目录/节点/设置,带访问 token;仅 web 模式可用,见 `docs/web-panel.md`)
 
-Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链接(启动时也会打印面板 URL 到 stdout,与 `dsh web:` 行一致);面板含五个页面——记忆页(顶部筛选 + Timeline/Table 布局切换)、状态页(team 状态 + 统计指标块 + usage 图表,含近 14 天每日柱状图、近 12 周日历热力图与按价格表的估算成本列)、目录页(记忆根注册表 + 登记/移除/导出)、节点状态页(跨进程 recall/extract/review 运行与装载状态,见 `docs/node-status.md`)、设置页(13 个配置键)。
+Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链接(启动时也会打印面板 URL 到 stdout,与 `dsh web:` 行一致);面板含五个页面——记忆页(顶部筛选 + Timeline/Table 布局切换)、状态页(记忆活动大表 + team 状态 + 统计指标块 + usage 图表,含近 14 天每日柱状图、近 12 周日历热力图与按价格表的估算成本列)、目录页(记忆根注册表 + 登记/移除/导出)、节点状态页(跨进程 recall/extract/review 运行与装载状态,见 `docs/node-status.md`)、设置页(13 个配置键)。
 
 ## 存储模型
 

@@ -79,6 +79,7 @@ import type { UsageCounter } from './stats.js'
 import { aggregateByDay, aggregateWindowTotals, appendUsageRow, readUsageRows } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
 import { costFor, estimateWindowCosts, loadPricing, pricingPath } from './pricing.js'
+import { aggregateEntryActivity } from './memory-activity.js'
 import {
   RUNTIME_HEARTBEAT_MS,
   beginNode,
@@ -815,6 +816,8 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
             daily: aggregateByDay(usageRows, 84),
             costs,
           },
+          // 记忆活动大表(docs/memory-activity.md):按条目 createdAt 实时聚合,不落盘。
+          activity: aggregateEntryActivity(hostMemoryDirs()),
         }
       },
       roots() {

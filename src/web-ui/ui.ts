@@ -384,6 +384,13 @@ export interface DashboardDto {
       readonly error?: string
     }
   }
+  /** 记忆活动大表(docs/memory-activity.md):最近 24h、15 分钟一格,counts 键 `type/domain`。 */
+  readonly activity: {
+    readonly windowStart: number
+    readonly windowEnd: number
+    readonly bucketMinutes: number
+    readonly buckets: readonly { readonly start: number; readonly counts: Readonly<Record<string, number>> }[]
+  }
 }
 
 /** 目录页一个根的文件级明细行。 */

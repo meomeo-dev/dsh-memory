@@ -7,7 +7,11 @@ import { rpc } from '../api'
 import type { Bootstrap, Dashboard } from '../api'
 import { formatCompact, formatBytes } from '../format'
 import { CalendarHeatmap, CHART_COLORS, DailyBars, Donut, StackedBars, StaticBars } from '../charts'
+import { ActivityTable } from './ActivityTable'
 import './status.css'
+
+/** 状态页自动刷新间隔:记忆活动大表是实时视图(docs/memory-activity.md)。 */
+const POLL_MS = 60_000
 
 /** 状态页:顶部 team 状态 → 中部统计指标块 → 正文 usage 图表。 */
 export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JSX.Element {
@@ -23,7 +27,11 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
       .finally(() => setLoading(false))
   }, [bootstrap])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const timer = setInterval(load, POLL_MS)
+    return () => clearInterval(timer)
+  }, [load])
 
   if (loading) return <div className="page"><div className="empty">加载中 (Loading)…</div></div>
   if (dashboard === undefined) {
@@ -55,6 +63,7 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
     <div className="page">
       <div className="status-head">
         <span className="status-title">记忆状态与用量 (Status &amp; Usage)</span>
+        <span className="meta">每 60s 自动刷新</span>
         <button type="button" className="refresh" onClick={load}>刷新 (Refresh)</button>
       </div>
       {error !== undefined && <div className="banner error">刷新失败: {error}</div>}
@@ -74,6 +83,9 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
             </div>
           ))}
       </section>
+
+      {/* 顶部大表:记忆活动(近 24h × 15min),位于统计指标块上方。 */}
+      {dashboard.activity !== undefined && <ActivityTable activity={dashboard.activity} />}
 
       {/* 中部:统计指标块 */}
       <section className="metric-grid">
