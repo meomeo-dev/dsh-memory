@@ -78,7 +78,7 @@ erDiagram
 
 **已决策:单一真相源。** `schema/memory-entry.schema.yaml`(JSON Schema 的 YAML)是数据契约的**唯一权威**,运行时 schemastery 校验器由它**生成**,不手写第二份。
 
-- **落点**:`schema/memory-entry.schema.yaml`,声明 9 字段(8 个业务字段 + `schemaVersion`),含 enum、pattern、minLength、required、default。
+- **落点**:`schema/memory-entry.schema.yaml`,声明 10 字段(8 个业务字段 + `schemaVersion` + `createdAt`),含 enum、pattern、minLength、required、default。
 - **代码生成**:`scripts/gen-schema.mjs` 读 yaml → 生成 `src/schema.generated.ts`(schemastery `z.object` + 枚举常量 `DOMAINS`/`LAYERS`/`MEMORY_TYPES` + 正则 `MEMORY_ID_RE` + 类型)。
 - **运行时零 yaml 依赖**:import 的是生成后的纯 TS;yaml 解析(`yaml` 库)只在 codegen(devDependency)用。
 - **防漂移**:`schema.generated.ts` 是生成产物,改动只发生在 schema.yaml;一条契约测试断言「生成的枚举/正则与 yaml 一致」(防手改生成文件)。
@@ -92,6 +92,7 @@ erDiagram
 ```
 migrations/
   0001-add-id-and-version.ts        # v0(无 id/无 schemaVersion)→ v1(补 id + schemaVersion=1)
+  0002-add-created-at.ts            # v1 → v2(补 createdAt,按文件名日期取当天本地零点)
 src/migrate.ts                      # 迁移执行器
 ```
 
@@ -111,26 +112,26 @@ src/migrate.ts                      # 迁移执行器
 
 **已决策:记录级。** 每条 jsonl 记录带 `schemaVersion` 字段(整数,单调递增),落地「这条数据是哪个 schema 版本写的」。
 
-- **记录级 `schemaVersion`**:管**记忆条目**的演进;`MemoryEntry` 8→9 字段。
+- **记录级 `schemaVersion`**:管**记忆条目**的演进;`MemoryEntry` 8→10 字段(加 `schemaVersion` 与 `createdAt`;`SCHEMA_VERSION` 当前 = 2)。
 - **文件级 `catalog.json` 已有 `CATALOG_VERSION`**(=1):管**索引**的演进。
-- `schemaVersion` 是「演进元数据」,**不进 MD 表格**(MD 仍 8 列,不含 schemaVersion)——它对「人阅读记忆」无意义,只供迁移引擎读。
+- `schemaVersion` 是「演进元数据」,**不进 MD 表格**(MD 9 列,不含 schemaVersion)——它对「人阅读记忆」无意义,只供迁移引擎读;`createdAt` 进 MD 表格与面板 Timeline(按创建时间排序)。
 
 ## 5. 已拍板决策(记录)
 
 | 决策 | 结论 |
 |---|---|
 | Schema 真相源 | `schema/memory-entry.schema.yaml` 单一真相源,运行时 schemastery 由它生成 |
-| `schemaVersion` 粒度 | 记录级字段(`MemoryEntry` 8→9) |
+| `schemaVersion` 粒度 | 记录级字段(`MemoryEntry` 8→10,当前 `SCHEMA_VERSION=2`) |
 | 迁移引擎 | 自建(JSONL 无成熟迁移引擎);`migrations/` + `src/migrate.ts` |
 | 迁移与校验 | 分离:旧数据经迁移补全 → 严格校验放行 |
 
 ## 6. 验收标准(AC)
 
-1. `schema/memory-entry.schema.yaml` 存在,声明 9 字段 + enum + pattern + required + default。
+1. `schema/memory-entry.schema.yaml` 存在,声明 10 字段(含 `schemaVersion` / `createdAt`)+ enum + pattern + required + default。
 2. `scripts/gen-schema.mjs` 可重复生成 `src/schema.generated.ts`,产物与 yaml 一致(契约测试锁定)。
 3. `src/schema.ts` 不再手写数据 schema;运行时的 `MEMORY_ENTRY_SCHEMA`/`DOMAINS`/`LAYERS`/`MEMORY_TYPES`/`MEMORY_ID_RE` 均来自 generated。
-4. `MemoryEntry` 带 `schemaVersion` 字段,`serializeEntry` 落盘时写入;MD 表格仍 8 列(不含 schemaVersion)。
-5. `migrations/0001-add-id-and-version.ts` 存在,把缺 `id`/`schemaVersion` 的旧记录补全为 `schemaVersion=1` + 合法 `id`。
+4. `MemoryEntry` 带 `schemaVersion` 与 `createdAt` 字段,`serializeEntry` 落盘时写入;MD 表格 9 列(含 createdAt,不含 schemaVersion)。
+5. `migrations/0001-add-id-and-version.ts` 存在,把缺 `id`/`schemaVersion` 的旧记录补全为 `schemaVersion=1` + 合法 `id`;`migrations/0002-add-created-at.ts` 存在,把 v1 记录补 `createdAt`(按文件名日期取当天本地零点)并升到 `schemaVersion=2`。
 6. `src/migrate.ts` 读记录 → 按 `schemaVersion` 依次应用缺失迁移 → 写回版本 → 严格校验。
 7. 旧数据(无 id)经迁移后可被严格校验放行;新数据直接通过。
 8. `pnpm test` 与 `pnpm typecheck` 全绿。

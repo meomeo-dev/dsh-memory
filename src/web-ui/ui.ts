@@ -1,8 +1,9 @@
 /**
  * 记忆 Web 面板(路径 B 独立页)的纯逻辑:token、页面路由、RPC 通道。
  *
- * 面板 = host 侧两个 GET 路由(`/memory` 记忆页、`/memory/settings` 设置页,
- * 均须 `?ac_token=`)+ 一个静态资源前缀(`/memory-assets/`)+ 一个只读为主的
+ * 面板 = host 侧五个页面 GET 路由(`/memory` 记忆页、`/memory/status` 状态页、
+ * `/memory/collections` 目录页、`/memory/nodes` 节点状态页、`/memory/settings`
+ * 设置页,均须 `?ac_token=`)+ 一个静态资源前缀(`/memory-assets/`)+ 一个
  * RPC channel(`/memory-api`,经 connection.handle 注册,authority: 'loopback',
  * 每个请求自动过 dsh 信任栅栏)。本模块不 import cordis:token 生成/比较、URL
  * 构造、HTML 壳渲染、资源路径防穿越、RPC 载荷校验与分发都是纯函数;路由与
@@ -244,7 +245,7 @@ export interface PanelFilters {
 export interface PanelEntryRow {
   /** 完整记忆条目(含 createdAt,Timeline 用)。 */
   readonly entry: MemoryEntry
-  /** 相对 `memory/` 目录的 `.remember.jsonl` 路径。 */
+  /** `.remember.jsonl` 的绝对路径(host 级注册表视图;不同根的同名文件以此区分来源)。 */
   readonly file: string
 }
 
@@ -534,9 +535,9 @@ function panelError<T>(code: 'bad-request' | 'internal', message: string): RpcRe
  * 面板 RPC 分发:token 门 → 载荷校验 → 注入依赖调用。
  *
  * 端点:entries(列记忆,带过滤)/ dashboard-get(状态页视图模型)/ roots-get
- * (目录页视图)/ root-add / root-forget / root-export(目录页管理)/ config-get
- * (读配置)/ config-set(写配置)。未知端点与非法载荷一律 bad-request;依赖抛错
- * 折叠为 internal。
+ * (目录页视图)/ root-add / root-forget / root-export(目录页管理)/ nodes-get
+ * (节点状态页)/ config-get(读配置)/ config-set(写配置)。未知端点与非法载荷
+ * 一律 bad-request;依赖抛错折叠为 internal。
  * @param endpoint - channel 相对端点。
  * @param payload - 客户端载荷(必须携带合法 acToken)。
  * @param token - 服务端持有的面板 token。

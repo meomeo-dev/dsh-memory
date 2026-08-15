@@ -1,6 +1,6 @@
 # Web 面板设计(web-panel)
 
-记忆 Web 面板:web 模式下给用户一个图形界面看记忆、改配置。两个页面 + 一个 RPC 通道,全部注册在 dsh-memory 包内,不依赖 dsh monorepo 改动。
+记忆 Web 面板:web 模式下给用户一个图形界面看记忆、看状态、管理目录、改配置。五个页面 + 一个 RPC 通道,全部注册在 dsh-memory 包内,不依赖 dsh monorepo 改动。
 
 ## 形态与入口
 
@@ -9,7 +9,7 @@
 | 页面 | `/memory`(记忆页)、`/memory/status`(状态页)、`/memory/collections`(目录页)、`/memory/nodes`(节点状态页)、`/memory/settings`(设置页) |
 | 静态资源 | `/memory-assets/*`(panel.js / style.css,前缀路由) |
 | RPC | `/memory-api` channel(entries / dashboard-get / roots-get / root-add / root-forget / root-export / config-get / config-set / nodes-get 九个端点) |
-| 打开方式 | ① `/lmemory ui` 命令返回可点击链接(主入口);② 启动时经 harness logger 打印一行(web 模式下是否可见取决于 logger 接线) |
+| 打开方式 | ① `/lmemory ui` 命令返回可点击链接(主入口);② 启动时打印面板 URL 到 stdout(与 `dsh web:` 行一致) |
 
 URL 恒带 `ac_token`(每次进程启动用 crypto 随机重新生成,64 位 hex);token 不写盘、不跨进程复用。
 
@@ -25,6 +25,9 @@ URL 恒带 `ac_token`(每次进程启动用 crypto 随机重新生成,64 位 hex
 
 ```
 GET  /memory?ac_token=<t>          → 记忆页 HTML 壳(403 当 token 缺失/不匹配)
+GET  /memory/status?ac_token=<t>   → 状态页 HTML 壳(同上)
+GET  /memory/collections?ac_token=<t> → 目录页 HTML 壳(同上)
+GET  /memory/nodes?ac_token=<t>    → 节点状态页 HTML 壳(同上)
 GET  /memory/settings?ac_token=<t> → 设置页 HTML 壳(同上)
 GET  /memory-assets/<file>?ac_token=<t> → 静态资源(白名单后缀 .js/.css/.map/.svg/.png/.woff2,
                                      单段文件名、拒绝 .. 与分隔符,防路径穿越)
@@ -79,6 +82,5 @@ src/index.ts               接线:registerPanel(webServer + connection 存在时
 
 ## 非目标
 
-- 不做记忆内容编辑/删除(面板只读浏览;写记忆仍走模型工具与 /lmemory 命令)。
-- 不做 stats/usage 面板(已有 `/lmemory stats` / `/lmemory usage` 命令)。
+- 不做记忆条目编辑/删除(条目写仍走模型工具与 /lmemory 命令;面板的写操作限于 config-set 与目录页登记/移除/导出)。
 - 不做 LAN 访问(loopback only);不集成进 dsh SPA 布局(独立页,路径 B)。

@@ -100,17 +100,17 @@
 **JSONL 记录 schema**(一行一条):
 
 ```json
-{"id":"m-3k9f2x8q1a","type":"rules","domain":"DurablePrefs","scope":"全项目","layer":"user","entry":"提交信息用 Conventional Commits","entryPoint":"-","references":"<repo_root>/CLAUDE.md"}
+{"id":"m-3k9f2x8q1a","schemaVersion":2,"createdAt":1755014400000,"type":"rules","domain":"DurablePrefs","scope":"全项目","layer":"user","entry":"提交信息用 Conventional Commits","entryPoint":"-","references":"<repo_root>/CLAUDE.md"}
 ```
 
-字段与 8 列一一对应:`id` / `type` / `domain` / `scope` / `layer` / `entry` / `entryPoint` / `references`。其中 `id` 是全局唯一编号(见 [memory-review.md](memory-review.md) §2),`domain` 与 `scope` 是**语义定位的正交对**(共同定位一条记忆),`layer` 是**存储元数据**(不参与语义定位)。
+JSONL 记录 10 字段:`id` / `schemaVersion` / `createdAt` / `type` / `domain` / `scope` / `layer` / `entry` / `entryPoint` / `references`。其中 `id` 是全局唯一编号(见 [memory-review.md](memory-review.md) §2),`domain` 与 `scope` 是**语义定位的正交对**(共同定位一条记忆),`layer` 是**存储元数据**(不参与语义定位);`createdAt` 是创建时间(epoch 毫秒,v1 数据由迁移 0002 回填,见 data-contract.md)。
 
-**MD 渲染**(纯函数,由 jsonl 派生,8 列):
+**MD 渲染**(纯函数,由 jsonl 派生,9 列):
 
 ```markdown
-| id | 类型 | 所属知识领域 (domain) | 影响范围 (Scope) | Layer (落点层) | 条目 | entry point (file path) | references (file path) |
-|---|---|---|---|---|---|---|---|
-| m-3k9f2x8q1a | rules | DurablePrefs | 全项目 | user | 提交信息用 Conventional Commits | - | <repo_root>/CLAUDE.md |
+| id | 类型 | 所属知识领域 (domain) | 影响范围 (Scope) | Layer (落点层) | 条目 | entry point (file path) | references (file path) | 创建时间 (createdAt) |
+|---|---|---|---|---|---|---|---|---|
+| m-3k9f2x8q1a | rules | DurablePrefs | 全项目 | user | 提交信息用 Conventional Commits | - | <repo_root>/CLAUDE.md | 2026-08-13 00:00:00 |
 ```
 
 渲染后必须通过 **Markdown 语法静态检查**(表格列数一致、无未闭合管道、`entry` 内的 `|` 已转义)。
@@ -118,7 +118,7 @@
 ## 7. 命名规范
 
 ```
-memory/YYYY-MM-DD[.<partition>].<memory_type>.remember.{jsonl|md}
+lmemory/YYYY-MM-DD[.<partition>].<memory_type>.remember.{jsonl|md}
 ```
 
 - `YYYY-MM-DD`:写入日期(按天分文件)。
@@ -127,7 +127,7 @@ memory/YYYY-MM-DD[.<partition>].<memory_type>.remember.{jsonl|md}
 - 每个 `.remember.md` 必有同名 `.remember.jsonl`,一一对应。
 
 示例:
-- `memory/2026-08-13.rules.remember.jsonl` + `.md`(无分区)
+- `lmemory/2026-08-13.rules.remember.jsonl` + `.md`(无分区)
 - `memory/2026-08-13.user.rules.remember.jsonl` + `.md`(partition = `user`,仅作分片标识,与 scope / layer 字段无关)
 
 ## 8. Layer 分层(落点层:Global / User / Project)
@@ -170,8 +170,8 @@ memory/YYYY-MM-DD[.<partition>].<memory_type>.remember.{jsonl|md}
 | 配置项 | 默认 | 含义 |
 |---|---|---|
 | `maxNodeKb` | `600`(单位 Kb) | 每个 v4-flash 记忆节点最多负责的记忆文本大小 |
-| `recallTopK` | 待定 | recall 返回的最大条目数 |
-| `rerankPrompt` | 待定 | 聚合阶段重排序候选的提示词模板 |
+| `recallTopK` | `10` | recall 返回的最大条目数 |
+| `rerankPrompt` | 既定模板(见 memory-runtime.ts) | 聚合阶段重排序候选的提示词模板 |
 | `warmupOnStart` | `true` | 插件启动时是否自动预热 team |
 
 > 配置项是「设计起点的合理集」,开发时可按需增删(如召回模型、节点并发度等)。存 `ctx.settings`,slash command 读写。

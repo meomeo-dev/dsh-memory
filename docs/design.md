@@ -62,6 +62,8 @@ DeepSeek Harness 已有 `session-reference`(整段历史会话的有界引用),�
 ```ts
 interface MemoryEntry {
   id: MemoryId                       // 全局唯一编号(m- + 10 位 base36),见 memory-review.md §2
+  schemaVersion: number              // 条目 schema 版本(当前 2)
+  createdAt: number                  // 创建时间(epoch 毫秒;v1 数据由迁移 0002 按文件名日期回填)
   type: 'rules' | 'lessons'          // 长期记忆只含两类,不含 state/todo
   domain: DomainId                   // 21 个 closed 枚举之一,见 concept.md §3
   scope: string                      // 影响范围:具体子系统 / 模块(自由文本);与 domain 正交成对
@@ -75,13 +77,13 @@ interface MemoryEntry {
 **契约常量**(单一真相源,工具校验与文件校验共用):
 - `MEMORY_TYPES = ['rules', 'lessons']`(不含 state/todo)
 - `DOMAINS = [21 个 domain id]`(与 concept.md §3 一一对应)
-- `TABLE_HEADER`(8 列表头:首列 `id` + 上述 7 字段)、`TABLE_SEPARATOR`(8 列分隔行)
+- `TABLE_HEADER`(9 列表头:首列 `id` + 上述 8 字段,含 createdAt)、`TABLE_SEPARATOR`(9 列分隔行)
 - 文件名正则:`/^\d{4}-\d{2}-\d{2}(?:\.[a-z0-9-]+)?\.(rules|lessons)\.remember\.(jsonl|md)$/`
 
 ## 6. 存储与渲染
 
 - **真相源 JSONL**:`remember` = 追加一行(校验 schema;`rules` 重复 `entry` 拒绝、`lessons` 单条 ≤300 字);`forget` = 删除匹配行;lessons 合并 = 替换该行(**无自动主题合并**,由 agent 按 `id` 改写条目,见 memory-review.md)。所有写都改 `.remember.jsonl`。
-- **渲染投影 MD**:每次写 jsonl 后,用纯函数 `renderMd(entries)` 重新生成同名 `.remember.md`(8 列表格:首列 `id` + 7 字段),再跑 `checkMarkdown(md)` 静态检查(列数一致、`|` 转义、表格闭合)。
+- **渲染投影 MD**:每次写 jsonl 后,用纯函数 `renderMd(entries)` 重新生成同名 `.remember.md`(9 列表格:首列 `id` + 8 字段,含 createdAt),再跑 `checkMarkdown(md)` 静态检查(列数一致、`|` 转义、表格闭合)。
 - MD 永不解析、只生成——写逻辑只碰 JSONL,避免手写 md 表格解析器的脆弱性。
 - **forget 跨文件定位(盲点修正)**:条目按命名(日期+分区)分散在多个文件里,不在「当天文件」。`forget` 因此**遍历全部可见的 `.remember.jsonl`**,对受影响的文件重写 jsonl + 重渲染 md,而非只改当天文件。
 - **空表语义(盲点修正)**:`forget` 删空某文件后,仍写出「表头 + 分隔行」的空表格(保留文件骨架),**不删除文件**——保持「.md 与 .jsonl 一一对应」的命名不变量。
@@ -156,6 +158,8 @@ interface MemoryEntry {
 | `/lmemory team start` / `stop` / `restart` | 组装 / 释放 / 重新组装 team |
 | `/lmemory query <text>` | 人主动查询长期记忆(fan-out 同 recall) |
 | `/lmemory config get` / `set <key> <value>` | 读写配置项(见 §9) |
+| `/lmemory ui` | 返回 Web 面板全部页面的 token 链接(仅 web 模式;见 web-panel.md) |
+| `/lmemory collections list` / `add` / `forget` / `export` | 记忆根注册表管理(见 storage-and-collections.md) |
 
 > `/lmemory review`(质检,注入主会话)与 `/lmemory catalog rebuild`(重建 catalog)属独立扩展,见 [memory-review.md](memory-review.md) §5 / §3。
 
@@ -200,7 +204,6 @@ interface MemoryEntry {
 - ❌ 整段会话全文检索(那是 `session-reference` 的活,§3)。
 - ❌ 向量化 / embedding 检索(先做 v4-flash 节点召回)。
 - ❌ 会话结束自动提取记忆(先做工具触发,模型提取;自动提取的三形态见 §12)。
-- ❌ Web UI 记忆管理界面(先做 `/lmemory` 命令)。
 - ❌ state/todo 进长期记忆文件(它们是短期上下文,concept.md §4)。
 - ❌ 完整 `ctx.subagents` 子代理节点(先做 `ctx.llm.stream` 轻量调用,见顶部决策 2)。
 

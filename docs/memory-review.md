@@ -45,7 +45,7 @@ interface MemoryEntry {
 
 **catalog 是派生的索引,不是真相源**:真相源仍是 `.remember.jsonl`,catalog 由 jsonl 扫描重建,记录「每条记忆 id → 所在文件」。
 
-**存储**:每层 `memory/` 目录一个 `catalog.json`,全量重写(非追加)。它是可重建的派生数据,增删改就重写整份,无 tombstone、无 compaction 问题。
+**存储**:每层 `lmemory/` 目录一个 `catalog.json`,全量重写(非追加)。它是可重建的派生数据,增删改就重写整份,无 tombstone、无 compaction 问题。
 
 ```json
 {
@@ -64,7 +64,7 @@ interface MemoryEntry {
 }
 ```
 
-- `file` 是相对本层 `memory/` 目录的路径,指向具体 `.remember.jsonl`。
+- `file` 是相对本层 `lmemory/` 目录的路径,指向具体 `.remember.jsonl`。
 - **分层**:与记忆文件同层分布(design.md §4),每层一个 `catalog.json`(各自独立,不做跨层合并)。查询/操作按「就近覆盖」合并可见层(内置 < 用户 < 项目,同级 `.dsh` > `.agents`)扫描定位,不读 catalog(见下方「定位方式」)。
 
 **维护(程序自动)**:每次写操作(`remember` / `update` / `delete` / `forget`)改完 `.remember.jsonl` 后,同步更新对应层的 `catalog.json`(增 / 改 / 删条目,全量重写)。

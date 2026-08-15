@@ -138,8 +138,9 @@ export interface NodeRuntimeDto {
   readonly lastError?: string
 }
 
-/** 一个进程的行(镜像 host 侧 ProcessRow)。 */
+/** 一个进程的行(镜像 host 侧 ProcessRow;formatVersion 随行携带但面板不消费)。 */
 export interface ProcessRowDto {
+  readonly formatVersion: number
   readonly pid: number
   readonly startedAt: number
   readonly cwd: string

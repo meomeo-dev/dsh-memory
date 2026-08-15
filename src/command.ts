@@ -79,7 +79,7 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
   }],
   ['ui', {
     usage: 'ui',
-    summary: '打开记忆 Web 面板(记忆页 + 设置页),返回带访问 token 的链接。',
+    summary: '打开记忆 Web 面板全部五个页面(记忆/状态/目录/节点/设置),返回带访问 token 的链接。',
     details: [
       '行为:仅在 web 模式(webServer + connection 服务存在)可用;token 随进程启动重新生成。',
       '示例:/lmemory ui',
@@ -113,7 +113,7 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
     usage: 'catalog rebuild',
     summary: '从全部 jsonl 重建 catalog(派生索引)。',
     details: [
-      '行为:全量重写每个 lmemory 目录的 catalog.json;真相源仍是 jsonl。',
+      '行为:全量重写全部可见层(内置 + 用户 + 当前项目)的 catalog.json;真相源仍是 jsonl。',
       '示例:/lmemory catalog rebuild',
     ],
   }],

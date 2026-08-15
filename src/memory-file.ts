@@ -124,9 +124,9 @@ export interface MemoryFile {
 
 /** 用户级写根与项目级写根。 */
 export interface MemoryWriteRoots {
-  /** 用户级写根(`~/.dsh/memory`)。 */
+  /** 用户级写根(`~/.dsh/lmemory`)。 */
   readonly user: string
-  /** 项目级写根(`<repo>/.dsh/memory`)。 */
+  /** 项目级写根(`<repo>/.dsh/lmemory`)。 */
   readonly project: string
 }
 

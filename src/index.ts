@@ -8,7 +8,8 @@
  *   - `ctx.commands.register` 提供 `/lmemory` 管理命令。
  *   - `ctx.settings` 存 maxNodeKb / recallTopK / rerankPrompt / warmupOnStart 等配置。
  *   - web 模式下经 `webServer.register` + `connection.rpc.handle` 挂记忆 Web 面板
- *     (`/memory`、`/memory/settings` 页面 + `/memory-api` RPC channel,见 ./web-ui/ui.js)。
+ *     (`/memory` 及 /status、/collections、/nodes、/settings 五页 + `/memory-api`
+ *     RPC channel,见 ./web-ui/ui.js)。
  *
  * 与 session-reference 的边界:session-reference 管「整段历史会话快照」,本插件管
  * 「提炼的、跨会话累积的语义事实」(只含 rules/lessons 两类)。所有注册都是
@@ -156,6 +157,8 @@ interface Runtime {
   panelToken?: string
   /** dsh web 监听端口(仅 web 模式;registerPanel 时回填,供状态快照)。 */
   port?: number
+  /** 面板不可用原因(web 模式但 dist 缺失等;供 `/lmemory ui` 给出准确文案)。 */
+  panelError?: string
 }
 
 /** remember 工具的规范化输出。 */
@@ -588,14 +591,16 @@ function renderUsageDaily(rows: readonly UsageLogRow[], days: number): string {
 }
 
 /** 渲染 token 用量(`/lmemory usage`):静态上下文成本估算 + 动态 LLM 调用消耗。 */
-function renderUsage(runtime: Runtime, cwd: string | undefined): string {
+function renderUsage(runtime: Runtime): string {
   let nodeChars = 0
   let nodeCount = 0
   for (const team of runtime.state.teams.values()) {
     nodeCount += team.nodes.length
     for (const node of team.nodes) nodeChars += node.text.length
   }
-  const summaryChars = renderSummary(discoverEntries(cwd)).length
+  // 摘要体积按进程启动目录计算——与节点状态页/状态页 dashboard 的同一指标同口径
+  // (多会话进程中各会话的摘要只在主会话注入,进程级视图以启动目录为准)。
+  const summaryChars = renderSummary(discoverEntries(process.cwd())).length
   const labels: readonly UsageLabel[] = ['recall', 'extract', 'review']
   const callLines = labels.map((label) => {
     const counter = runtime.usage.get(label) ?? EMPTY_USAGE
@@ -636,7 +641,8 @@ function renderConfig(config: MemoryConfig, key?: string): string {
 
 /**
  * 注册记忆 Web 面板(路径 B 独立页,见 ./ui.js 的模块文档):
- *   - GET `/memory`(记忆页)与 `/memory/settings`(设置页),均须 `?ac_token=`;
+ *   - GET `/memory`(记忆页)、`/memory/status`(状态页)、`/memory/collections`(目录页)、
+ *     `/memory/nodes`(节点状态页)、`/memory/settings`(设置页),均须 `?ac_token=`;
  *   - GET `/memory-assets/*`(前缀,白名单后缀 + 路径防穿越 + token);
  *   - POST `/memory-api/*` RPC channel(authority: 'loopback',信任栅栏 + 载荷 token)。
  *
@@ -652,6 +658,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
   const panelDir = findPanelDist()
   if (panelDir === undefined) {
     ctx.logger.warn('dsh-memory: panel dist not found (run `pnpm panel:build`); web panel disabled')
+    runtime.panelError = 'panel build assets missing (run `pnpm panel:build` in the dsh-memory package)'
     return
   }
   const token = generatePanelToken()
@@ -824,7 +831,9 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
       { authority: 'loopback' },
     )
     cctx.effect(() => disposeChannel, 'dsh-memory: /memory-api channel')
-    cctx.logger.info(`dsh-memory panel: ${panelUrl(web.port, 'memory', token)}`)
+    // 面板 URL 是就绪信号,打印到 stdout(与 `dsh web:` 行一致,voice-tts 同款);
+    // cctx.logger.info 在 web 模式下不落 stdout,用户/agent 看不到面板入口。
+    console.log(`dsh-memory panel: ${panelUrl(web.port, 'memory', token)}`)
   })
 }
 
@@ -874,13 +883,16 @@ async function handleCommand(
           }
           return { kind: 'success', text: renderUsageDaily(readUsageRows(), command.days) }
         }
-        return { kind: 'success', text: renderUsage(runtime, cwd) }
+        return { kind: 'success', text: renderUsage(runtime) }
       }
       case 'ui': {
         const token = runtime.panelToken
         const port = ctx.get('webServer')?.port
-        if (token === undefined || port === undefined) {
+        if (port === undefined) {
           return { kind: 'error', text: 'Memory panel is not available: this session has no webServer/connection (web mode only).' }
+        }
+        if (token === undefined) {
+          return { kind: 'error', text: `Memory panel is not available: ${runtime.panelError ?? 'panel registration failed'}.` }
         }
         // 命令卡片只在结果含换行时可展开/复制(GenericCommandCard 的 expandable 判定);
         // 卡片是纯文本渲染,故用裸 URL 而非 markdown 链接语法。
@@ -1335,8 +1347,8 @@ export function apply(ctx: Context): void {
 
     ctx.commands.register({
       name: 'lmemory',
-      description: 'manage long-term memory (status / stats / usage / ui / team / query / config / review)',
-      input: { hint: 'status | stats | usage | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | help [command]' },
+      description: 'manage long-term memory (status / stats / usage / ui / team / query / config / review / catalog / collections)',
+      input: { hint: 'status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | collections list|add|forget|export | help [command]' },
       handler: invocation => handleCommand(ctx, runtime, scope, invocation),
     })
 
