@@ -66,6 +66,33 @@ export function migrateRecord(raw: unknown, context: CreatedAtContext = { now: D
 }
 
 /**
+ * 统计一个 jsonl 文件中「迁移 + 严格校验通过」的条目数(坏行跳过,不抛、不写回)。
+ *
+ * 与 {@link readJsonlMigrating} 的差异:读路径遇到坏行要 fail loud(防止写路径
+ * 静默丢弃数据),但**只读计数**(注册表扫描、目录页计数)不能因为一条坏行
+ * 让整个面板失效——计数按「运行时实际能读到的条目」计,坏行降级跳过。
+ * @param jsonlPath - jsonl 文件路径。
+ * @param now - createdAt 回填上下文(测试注入)。
+ * @returns 通过校验的条目数。
+ */
+export function countValidJsonlRows(jsonlPath: string, now: number = Date.now()): number {
+  const text = readFileSync(jsonlPath, 'utf8')
+  const fileDate = /^(\d{4}-\d{2}-\d{2})/.exec(basename(jsonlPath))?.[1]
+  const context: CreatedAtContext = { fileDate, now }
+  let count = 0
+  for (const line of text.split('\n')) {
+    if (line.trim().length === 0) continue
+    try {
+      migrateRecord(JSON.parse(line), context)
+      count += 1
+    } catch {
+      // 坏行跳过:计数口径与导出(原始行数)的差异见 collections.ts 注释。
+    }
+  }
+  return count
+}
+
+/**
  * 按确定性字段顺序序列化一条记忆为 JSONL 一行(id 在前,`schemaVersion` 次之)。
  * @param entry - 归一化后的记忆条目。
  * @returns 一行 JSON 文本(不含换行)。

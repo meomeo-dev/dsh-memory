@@ -104,8 +104,10 @@ roots/<nn>/<YYYY-MM-DD[.p].<type>.remember.md
 {"ts":1786100000000,"label":"extract","inputTokens":800,"outputTokens":150,"cacheReadTokens":0}
 ```
 
-- **写入点**:`callFlash` 收到 usage chunk 即聚合为一行 appendFileSync——同一
-  代码路径覆盖 recall/extract/review 三类,进程内计数器(实时视图)照旧更新。
+- **写入点**:`callFlash` 在一次调用结束(成功或失败)时把该调用的 usage 聚合为
+  一行 appendFileSync——同一代码路径覆盖 recall/extract/review 三类,进程内计数器
+  (实时视图)照旧更新;失败调用同样落盘,保证 `/lmemory usage --days` 与状态页
+  每日图不因失败调用少计。
 - **位置**:用户根(记录这台 host 的消耗,与项目无关;随用户根备份)。
 - **容量**:单行约 100B;一天 100 次调用 10KB,无旋转策略。损坏行跳过。
 - **读侧**:`src/usage-log.ts` 纯模块——`appendUsageRow` / `readUsageRows`

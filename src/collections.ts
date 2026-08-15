@@ -120,7 +120,13 @@ export function exportCollections(
   return { dir, totalEntries, rootsExported: manifestRoots.length }
 }
 
-/** 数一个 jsonl 文件的非空行数(只作清单计数,不做迁移/校验)。 */
+/**
+ * 数一个 jsonl 文件的非空行数(只作导出清单计数,不做迁移/校验)。
+ *
+ * 导出是**原样拷贝**,manifest 的 entries 描述「被拷贝的行数」,故按原始行计;
+ * 注册表/目录页的计数按「运行时能读到的条目」计(迁移+校验通过,坏行跳过,
+ * 见 registry.scanRootDetail)——健康数据下两者一致,坏行只在导出侧多计。
+ */
 function countJsonlRows(jsonlPath: string): number {
   return readFileSync(jsonlPath, 'utf8').split('\n').filter(line => line.trim().length > 0).length
 }

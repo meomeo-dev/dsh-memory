@@ -347,7 +347,7 @@ export function removeByEntry(cwd: string, entryText: string, type?: MemoryType)
  * 按 id 或类型/领域/范围/落点层过滤查找记忆,返回完整条目与所在文件。
  *
  * 定位用「扫描可见文件 + 迁移」的总是正确路径;catalog 是本模块维护的派生索引
- * (供未来 `memory-find` 工具快速查 id → 文件),`find` 不依赖它也能返回一致结果。
+ * (写入时同步重写,供统计 / 导出 / 目录页等外部读取),`find` 不依赖它也能返回一致结果。
  * @param cwd - 当前工作目录;缺省只查内置 + 用户级。
  * @param query - 过滤条件(空条件返回全部)。
  * @returns 命中的记忆(按目录与文件排序)。

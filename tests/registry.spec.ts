@@ -8,6 +8,7 @@ import {
   loadRegistry,
   refreshRegistry,
   registerExplicitRoot,
+  scanRootDetail,
   saveRegistry,
   scanRoot,
 } from '../src/registry.js'
@@ -74,6 +75,29 @@ describe('scanRoot / isMemoryRoot', () => {
     const empty = join(dshHome, 'empty-root')
     mkdirSync(empty)
     expect(isMemoryRoot(empty)).toBe(true)
+  })
+})
+
+describe('scanRootDetail', () => {
+  it('skips corrupt jsonl rows instead of throwing (registry counting is read-only)', () => {
+    const dir = join(dshHome, 'lmemory')
+    mkdirSync(dir, { recursive: true })
+    const good = JSON.stringify({ id: 'm-0000000001', schemaVersion: 2, createdAt: NOW, type: 'rules', domain: 'Style', scope: '全项目', layer: 'user', entry: '好条目', entryPoint: '-', references: '-' })
+    writeFileSync(join(dir, '2026-08-13.rules.remember.jsonl'), `${good}\n{broken json\n`, 'utf8')
+
+    const detail = scanRootDetail(dir)
+    expect(detail.entries).toBe(1)
+    expect(detail.files).toBe(1)
+    expect(detail.filesDetail).toEqual([{ file: '2026-08-13.rules.remember.jsonl', entries: 1 }])
+    // 坏行存在时 refreshRegistry 也不抛(启动路径依赖这一点)。
+    expect(refreshRegistry(project, NOW).roots.some(root => root.root === dir)).toBe(true)
+  })
+
+  it('treats an unreadable registered path as an empty scan', () => {
+    const asFile = join(dshHome, 'lmemory')
+    mkdirSync(dshHome, { recursive: true })
+    writeFileSync(asFile, 'not a dir', 'utf8')
+    expect(scanRootDetail(asFile)).toEqual({ entries: 0, files: 0, filesDetail: [] })
   })
 })
 

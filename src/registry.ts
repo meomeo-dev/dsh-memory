@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { agentsHome, dshHome, findProjectRoot } from './memory-file.js'
-import { readJsonlMigrating } from './migrate.js'
+import { countValidJsonlRows } from './migrate.js'
 
 /** registry 格式版本(结构变化时递增;读取端只认格式,不认识则视为空表)。 */
 export const REGISTRY_FORMAT_VERSION = 1
@@ -109,14 +109,27 @@ export interface RootScanDetail {
   readonly filesDetail: readonly { readonly file: string; readonly entries: number }[]
 }
 
-/** 扫描一个记忆根目录(只读;目录不存在返回 0/0 与空明细)。 */
+/**
+ * 扫描一个记忆根目录(只读;目录不存在返回 0/0 与空明细)。
+ *
+ * 计数口径 = 「迁移 + 严格校验通过」的条目(坏行跳过,不抛)——一条坏行不能让
+ * 启动期 refreshRegistry 或整个目录页失效;与导出的计数口径(原始非空行数,
+ * 描述被拷贝的产物)不同,健康数据下两者一致,见 collections.ts。
+ */
 export function scanRootDetail(dir: string): RootScanDetail {
   if (!existsSync(dir)) return { entries: 0, files: 0, filesDetail: [] }
+  let names: string[]
+  try {
+    names = readdirSync(dir).sort()
+  } catch {
+    // 登记后路径被替换成非常规文件等:按不可读目录处理,保持最后已知计数来源稳定。
+    return { entries: 0, files: 0, filesDetail: [] }
+  }
   let entries = 0
   const filesDetail: { file: string; entries: number }[] = []
-  for (const name of readdirSync(dir).sort()) {
+  for (const name of names) {
     if (!name.endsWith('.remember.jsonl')) continue
-    const count = readJsonlMigrating(join(dir, name)).entries.length
+    const count = countValidJsonlRows(join(dir, name))
     entries += count
     filesDetail.push({ file: name, entries: count })
   }

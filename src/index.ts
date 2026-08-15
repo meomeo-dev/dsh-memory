@@ -261,7 +261,11 @@ async function callFlash(
       }
     }
   } catch (error) {
-    endNode(runtime.nodes, label, startedAt, Date.now(), error instanceof Error ? error.message : String(error))
+    const message = error instanceof Error ? error.message : String(error)
+    endNode(runtime.nodes, label, startedAt, Date.now(), message)
+    // 失败调用也落 usage.jsonl:usage chunk 已到账,持久化日志与进程内计数器同口径,
+    // 否则 `/lmemory usage --days` 与状态页每日图对失败调用永久少计。
+    if (lastUsage !== undefined) appendUsageRow(lastUsage)
     runtime.publish()
     throw error
   }

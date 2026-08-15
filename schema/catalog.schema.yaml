@@ -1,7 +1,7 @@
 $schema: "https://json-schema.org/draft/2020-12/schema"
 $id: "memory-catalog"
 title: "MemoryCatalog"
-description: "catalog.json(派生索引)的数据契约。每层 memory/ 目录一个,记录「记忆 id → 所在文件」;真相源仍是 .remember.jsonl,不一致以 jsonl 为准。"
+description: "catalog.json(派生索引)的数据契约。每层 lmemory/ 目录一个,记录「记忆 id → 所在文件」;真相源仍是 .remember.jsonl,不一致以 jsonl 为准。"
 x-schema-version: 1
 type: object
 additionalProperties: false
@@ -30,7 +30,7 @@ $defs:
       file:
         type: string
         minLength: 1
-        description: "相对本层 memory/ 目录的 .remember.jsonl 路径"
+        description: "相对本层 lmemory/ 目录的 .remember.jsonl 路径"
       type:
         type: string
         enum: [rules, lessons]
