@@ -1,0 +1,1 @@
+# npm pack 时用 files 白名单;本文件置空以覆盖 .gitignore 的排除规则(panel/dist 是产物、git 不提交,但须进 tarball)。

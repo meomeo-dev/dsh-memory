@@ -7,6 +7,8 @@
  *   - `ctx.systemPrompt.section` 注入「已知记忆」摘要(order 10)。
  *   - `ctx.commands.register` 提供 `/lmemory` 管理命令。
  *   - `ctx.settings` 存 maxNodeKb / recallTopK / rerankPrompt / warmupOnStart 等配置。
+ *   - web 模式下经 `webServer.register` + `connection.rpc.handle` 挂记忆 Web 面板
+ *     (`/memory`、`/memory/settings` 页面 + `/memory-api` RPC channel,见 ./web-ui/ui.js)。
  *
  * 与 session-reference 的边界:session-reference 管「整段历史会话快照」,本插件管
  * 「提炼的、跨会话累积的语义事实」(只含 rules/lessons 两类)。所有注册都是
@@ -26,6 +28,8 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-client-connection'
 
 import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
@@ -70,6 +74,22 @@ import type { ExtractFn, TranscriptMessage } from './extract.js'
 import { computeStats, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.js'
 import type { UsageCounter } from './stats.js'
 import { COMMAND_HELPS, USAGE, parseLmemoryCommand, renderHelp } from './command.js'
+import {
+  PANEL_CHANNEL,
+  assetContentType,
+  describeConfig,
+  findPanelDist,
+  generatePanelToken,
+  handlePanelRpc,
+  matchesPanelQuery,
+  panelUrl,
+  queryToken,
+  readPanelAsset,
+  renderPanelShell,
+  resolvePanelAsset,
+  safeTokenEqual,
+} from './web-ui/ui.js'
+import type { PanelDeps, PanelPage } from './web-ui/ui.js'
 
 /** Stable Cordis plugin name. */
 export const name = 'dsh-memory'
@@ -111,6 +131,8 @@ interface Runtime {
   readonly annealing: Map<string, number>
   /** 职责分类 → LLM 调用消耗累计(供 `/lmemory usage`)。 */
   readonly usage: Map<UsageLabel, UsageCounter>
+  /** Web 面板访问 token(仅 web 模式注册;每次进程启动重新生成)。 */
+  panelToken?: string
 }
 
 /** remember 工具的规范化输出。 */
@@ -490,6 +512,109 @@ function renderConfig(config: MemoryConfig, key?: string): string {
   return CONFIG_KEYS.map(k => `${k} = ${String((config as unknown as Record<string, unknown>)[k])}`).join('\n')
 }
 
+/**
+ * 注册记忆 Web 面板(路径 B 独立页,见 ./ui.js 的模块文档):
+ *   - GET `/memory`(记忆页)与 `/memory/settings`(设置页),均须 `?ac_token=`;
+ *   - GET `/memory-assets/*`(前缀,白名单后缀 + 路径防穿越 + token);
+ *   - POST `/memory-api/*` RPC channel(authority: 'loopback',信任栅栏 + 载荷 token)。
+ *
+ * 仅当 webServer 与 connection 服务同时存在(web 模式)且 panel 构建产物在位时
+ * 注册;headless 环境两个服务都不存在,面板不存在,`/lmemory ui` 报不可用。
+ * @param ctx - 插件上下文。
+ * @param runtime - 运行时状态(token 记录于此)。
+ * @param scope - settings 命名空间 scope(config-get/set 端点经它读写)。
+ */
+function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<MemoryConfig>): void {
+  const web = ctx.get('webServer')
+  if (web === undefined) return
+  const panelDir = findPanelDist()
+  if (panelDir === undefined) {
+    ctx.logger.warn('dsh-memory: panel dist not found (run `pnpm panel:build`); web panel disabled')
+    return
+  }
+  const token = generatePanelToken()
+  runtime.panelToken = token
+
+  const servePage = (page: PanelPage): WebRoute['handler'] => (req, res) => {
+    // token 门:缺失或不匹配一律 403(常量时间比较)。
+    if (!safeTokenEqual(queryToken(req.url) ?? '', token)) {
+      res.writeHead(403)
+      res.end('forbidden')
+      return
+    }
+    const html = renderPanelShell({ page, token, channel: PANEL_CHANNEL })
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(html)
+  }
+
+  ctx.effect(() => web.register({ kind: 'exact', path: '/memory', handler: servePage('memory') }), 'dsh-memory: /memory page')
+  ctx.effect(() => web.register({ kind: 'exact', path: '/memory/settings', handler: servePage('settings') }), 'dsh-memory: /memory/settings page')
+  ctx.effect(() => web.register({
+    kind: 'prefix',
+    path: '/memory-assets',
+    handler: (req, res) => {
+      const rawUrl = req.url ?? '/'
+      let pathname: string
+      try {
+        pathname = new URL(rawUrl, 'http://x').pathname
+      } catch {
+        res.writeHead(400)
+        res.end()
+        return
+      }
+      if (!safeTokenEqual(queryToken(rawUrl) ?? '', token)) {
+        res.writeHead(403)
+        res.end('forbidden')
+        return
+      }
+      const file = resolvePanelAsset(panelDir, pathname)
+      const content = file === undefined ? undefined : readPanelAsset(panelDir, pathname)
+      if (file === undefined || content === undefined) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+      res.writeHead(200, {
+        'content-type': assetContentType(file),
+        'cache-control': 'no-cache',
+      })
+      res.end(content)
+    },
+  }), 'dsh-memory: /memory-assets route')
+
+  // connection 由 client-connection 插件 fiber 提供:loader 并发启动 plugin,
+  // apply 时该 fiber 未必已 ACTIVE,故用声明式注入而非 ctx.get(与 api-proxy 同款)。
+  ctx.inject(['connection'], (cctx) => {
+    const deps: PanelDeps = {
+      entries(cwd, filters) {
+        const rows = find(cwd, {
+          ...(filters.type !== undefined ? { type: filters.type } : {}),
+          ...(filters.domain !== undefined ? { domain: filters.domain } : {}),
+          ...(filters.layer !== undefined ? { layer: filters.layer } : {}),
+        }).filter(({ entry }) => filters.query === undefined || matchesPanelQuery(entry, filters.query))
+        rows.sort((a, b) => b.entry.createdAt - a.entry.createdAt)
+        return rows.map(({ entry, file }) => ({ entry, file }))
+      },
+      getConfig() {
+        return describeConfig(runtime.config)
+      },
+      async setConfig(patch) {
+        await scope.update(patch)
+        applyConfig(runtime, scope.get())
+        return describeConfig(runtime.config)
+      },
+    }
+
+    const disposeChannel = cctx.connection.rpc.handle(
+      PANEL_CHANNEL,
+      (endpoint, payload, _signal) => handlePanelRpc(endpoint, payload, token, deps),
+      { authority: 'loopback' },
+    )
+    cctx.effect(() => disposeChannel, 'dsh-memory: /memory-api channel')
+    cctx.logger.info(`dsh-memory panel: ${panelUrl(web.port, 'memory', token)}`)
+  })
+}
+
 /** 把配置命令里的原始字符串强转成对应 JS 值。 */
 function coerceConfigValue(key: string, raw: string): unknown {
   if (key === 'maxNodeKb' || key === 'recallTopK' || key === 'extractInterval') {
@@ -531,6 +656,18 @@ async function handleCommand(
         return { kind: 'success', text: renderStats(cwd, runtime.config) }
       case 'usage':
         return { kind: 'success', text: renderUsage(runtime, cwd) }
+      case 'ui': {
+        const token = runtime.panelToken
+        const port = ctx.get('webServer')?.port
+        if (token === undefined || port === undefined) {
+          return { kind: 'error', text: 'Memory panel is not available: this session has no webServer/connection (web mode only).' }
+        }
+        const links = [
+          `[记忆面板](${panelUrl(port, 'memory', token)})`,
+          `[设置面板](${panelUrl(port, 'settings', token)})`,
+        ].join(' · ')
+        return { kind: 'success', text: `Memory panel: ${links}` }
+      }
       case 'team': {
         if (command.action === 'start') {
           ensureTeam(runtime.state, cwd, runtime.config)
@@ -909,9 +1046,12 @@ export function apply(ctx: Context): void {
 
     ctx.commands.register({
       name: 'lmemory',
-      description: 'manage long-term memory (status / stats / usage / team / query / config / review)',
-      input: { hint: 'status | stats | usage | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | help [command]' },
+      description: 'manage long-term memory (status / stats / usage / ui / team / query / config / review)',
+      input: { hint: 'status | stats | usage | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | help [command]' },
       handler: invocation => handleCommand(ctx, runtime, scope, invocation),
     })
+
+    // Web 面板(路径 B):web 模式下挂页面路由 + RPC channel;headless 时静默不存在。
+    registerPanel(ctx, runtime, scope)
   })
 }

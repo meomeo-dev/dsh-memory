@@ -38,11 +38,14 @@ dsh --profile demo
 - `/lmemory review [layer|domain]` —— 用 `deepseek-v4-pro` 质检记忆,发现矛盾/重复/过时/背离,报告注入主会话
 - `/lmemory catalog rebuild` —— 从全部 jsonl 重建 catalog
 - `/lmemory config get|set <key> [value]` —— 读写配置(见 `docs/design.md` §9 / `docs/auto-extraction.md` §7)
+- `/lmemory ui` —— 返回记忆 Web 面板链接(记忆页 + 设置页,带访问 token;仅 web 模式可用,见 `docs/web-panel.md`)
+
+Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链接(启动时也会经 harness logger 打印一行,是否可见取决于 web 模式的 logger 接线);面板含记忆页(顶部筛选 + Timeline/Table 布局切换)与设置页(13 个配置键)。
 
 ## 存储模型
 
-- **真相源** `.remember.jsonl`:一行一条 JSON,逐行 schema 校验(`id` 唯一编号、`type` ∈ rules/lessons、`domain` ∈ 21 枚举、`scope` 非空自由文本(影响范围)、`layer` ∈ global/user/project、`entry` 非空)。
-- **渲染投影** `.remember.md`:8 列 Markdown 表格(首列 `id` + 7 个字段),由纯函数渲染生成,绝不解析 MD。
+- **真相源** `.remember.jsonl`:一行一条 JSON,逐行 schema 校验(`id` 唯一编号、`createdAt` 创建时间(epoch 毫秒,系统赋值)、`type` ∈ rules/lessons、`domain` ∈ 21 枚举、`scope` 非空自由文本(影响范围)、`layer` ∈ global/user/project、`entry` 非空)。
+- **渲染投影** `.remember.md`:9 列 Markdown 表格(首列 `id` + 8 个字段,含创建时间),由纯函数渲染生成,绝不解析 MD。
 - **派生索引** `catalog.json`:每层 `memory/` 目录一个,记录「记忆 id → 所在文件」,全量重写、可 `rebuild` 重建(真相源仍是 jsonl)。
 - 命名规范:`YYYY-MM-DD[.<partition>].<type>.remember.{jsonl,md}`。
 - 目录发现:内置 < 用户 `~/.agents/memory` < 用户 `~/.dsh/memory` < 项目 `<repo>/.agents/memory` < 项目 `<repo>/.dsh/memory`。
@@ -55,7 +58,8 @@ dsh --profile demo
 - [memory-review.md](docs/memory-review.md) —— 记忆寻址、目录与质检:唯一编号 id、catalog、review
 - [data-contract.md](docs/data-contract.md) —— 数据契约与演进式数据设计:ER/3NF、Data+Schema+Migrate
 - [robustness.md](docs/robustness.md) —— 健壮性设计:节点容错、LLM 停机语义
+- [web-panel.md](docs/web-panel.md) —— Web 面板设计:路由、token、信任栅栏、RPC 端点、构建管线
 
 ## 状态
 
-已实现主动记忆(remember / recall / forget)+ 质检(review)+ 自动提取(auto-extraction)+ 数据契约(schema.yaml + 迁移引擎)+ 节点容错。单元测试 125 个全绿(模型调用以 mock 注入);召回 / 质检 / 抽取需真实 `DEEPSEEK_API_KEY` 端到端验证,npm 发布待人工配置 Automation token 后经 release workflow 触发。
+已实现主动记忆(remember / recall / forget)+ 质检(review)+ 自动提取(auto-extraction)+ 数据契约(schema v2:createdAt + 迁移引擎)+ 节点容错 + Web 面板(/memory 记忆页、/memory/settings 设置页)。单元测试 174 个全绿(模型调用以 mock 注入);召回 / 质检 / 抽取需真实 `DEEPSEEK_API_KEY` 端到端验证,npm 发布待人工配置 Automation token 后经 release workflow 触发。

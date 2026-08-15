@@ -1,8 +1,8 @@
 /**
  * `/lmemory` 命令的参数解析(纯函数)。
  *
- * 子命令:status / team start|stop|restart / query <text> / config get|set /
- * review [layer|domain]。
+ * 子命令:status / stats / usage / ui / team start|stop|restart / query <text> /
+ * config get|set / review [layer|domain] / catalog rebuild / help。
  * 解析只做词法切分,不校验配置键语义(交给 index.ts 的 handler)。
  * @module dsh-memory/command
  */
@@ -21,6 +21,7 @@ export type LmemoryCommand =
   | { readonly kind: 'status' }
   | { readonly kind: 'stats' }
   | { readonly kind: 'usage' }
+  | { readonly kind: 'ui' }
   | { readonly kind: 'team'; readonly action: 'start' | 'stop' | 'restart' }
   | { readonly kind: 'query'; readonly text: string }
   | { readonly kind: 'config-get'; readonly key?: string }
@@ -29,7 +30,7 @@ export type LmemoryCommand =
   | { readonly kind: 'catalog' }
 
 /** 命令用法回显文案。 */
-export const USAGE = 'Usage: /lmemory status | stats | usage | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | help [command]'
+export const USAGE = 'Usage: /lmemory status | stats | usage | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | help [command]'
 
 /** 一条子命令的帮助详情(供 `/lmemory help [command]`)。 */
 export interface CommandHelp {
@@ -65,6 +66,14 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
     details: [
       '行为:静态部分按 chars/4 粗估;动态部分按 recall / extract / review 分类累计,仅本进程,重启归零。',
       '示例:/lmemory usage',
+    ],
+  }],
+  ['ui', {
+    usage: 'ui',
+    summary: '打开记忆 Web 面板(记忆页 + 设置页),返回带访问 token 的链接。',
+    details: [
+      '行为:仅在 web 模式(webServer + connection 服务存在)可用;token 随进程启动重新生成。',
+      '示例:/lmemory ui',
     ],
   }],
   ['team', {
@@ -146,6 +155,7 @@ export function parseLmemoryCommand(rawInput: string): LmemoryCommand {
   if (head === 'status') return { kind: 'status' }
   if (head === 'stats') return { kind: 'stats' }
   if (head === 'usage') return { kind: 'usage' }
+  if (head === 'ui') return { kind: 'ui' }
   if (head === 'team') {
     const action = parts[1]?.toLowerCase()
     if (action === 'start' || action === 'stop' || action === 'restart') return { kind: 'team', action }

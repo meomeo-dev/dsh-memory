@@ -1,0 +1,454 @@
+/*
+ * 设计令牌镜像自 @deepseek-ai/dsh-client-ui-theme 的
+ * styles/design-platform.css(--dsw-static-* 色板 + --dsw-alias-* 别名,light 主题)
+ * 与 styles/base.css(字体栈 / 缓动曲线)。面板是独立页,不加载 dsh SPA 的样式表,
+ * 故按值镜像子集;上游改值需同步此处(漂移只影响视觉,不影响功能)。
+ */
+:root {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas,
+    'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-800: rgb(53, 54, 56);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-100: rgb(228, 237, 253);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-deepseek-800: rgb(52, 65, 91);
+
+  --dsw-static-amber-100: rgb(254, 245, 231);
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-500: rgb(34, 197, 94);
+
+  --dsw-static-red-50: rgb(254, 242, 242);
+  --dsw-static-red-500: rgb(239, 68, 68);
+  --dsw-static-red-600: rgb(236, 19, 19);
+
+  /* light 主题别名子集 */
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-600);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-family);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.mono {
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+}
+
+.shell {
+  min-height: 100vh;
+}
+
+/* 页头:白底 + 品牌 + 页签,镜像 dsh 顶栏的分层。 */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 48px;
+  padding: 0 20px;
+  background: var(--dsw-alias-bg-base);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  position: sticky;
+  top: 0;
+}
+
+.brand {
+  font-weight: 600;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--dsw-alias-label-tertiary);
+  text-decoration: none;
+  transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+a.tab:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.tab.active {
+  background: var(--dsw-static-deepseek-50);
+  color: var(--dsw-static-deepseek-600);
+  font-weight: 500;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page.narrow {
+  max-width: 720px;
+}
+
+/* 过滤条:白卡片 + 输入控件。 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.filter-bar input[type='search'] {
+  flex: 1;
+  min-width: 200px;
+}
+
+.filter-bar select,
+.filter-bar input,
+.form select,
+.form input[type='text'],
+.form input[type='number'],
+.form textarea {
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.filter-bar select:focus,
+.filter-bar input:focus,
+.form select:focus,
+.form input:focus,
+.form textarea:focus {
+  border-color: var(--dsw-static-deepseek-500);
+}
+
+.count {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.layout-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.layout-toggle button,
+button.primary {
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.layout-toggle button:hover {
+  border-color: var(--dsw-alias-border-l3);
+  color: var(--dsw-alias-label-primary);
+}
+
+.layout-toggle button.active {
+  background: var(--dsw-static-deepseek-50);
+  border-color: var(--dsw-static-deepseek-500);
+  color: var(--dsw-static-deepseek-600);
+}
+
+/* 卡片与表格。 */
+.card {
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.card .entry {
+  margin: 0 0 6px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.card .meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+}
+
+.card .meta .mono {
+  font-size: 12px;
+}
+
+.time {
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  font-family: var(--ds-font-family-code);
+  white-space: nowrap;
+}
+
+.badges {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.badge.rules {
+  background: var(--dsw-static-deepseek-50);
+  color: var(--dsw-static-deepseek-600);
+}
+
+.badge.lessons {
+  background: var(--dsw-static-amber-100);
+  color: var(--dsw-static-amber-600);
+}
+
+.badge.domain {
+  background: var(--dsw-static-neutral-bluish-75);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.badge.layer {
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.timeline section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.day {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.day-count {
+  font-weight: 400;
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+}
+
+.table-wrap {
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  white-space: nowrap;
+}
+
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  vertical-align: top;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+td.nowrap {
+  white-space: nowrap;
+}
+
+td.entry-cell {
+  max-width: 280px;
+}
+
+/* 空态 / 提示 / 表单。 */
+.empty {
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--dsw-alias-label-caption);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.banner {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.banner.ok {
+  background: var(--dsw-static-green-100);
+  color: var(--dsw-static-green-500);
+}
+
+.banner.error {
+  background: var(--dsw-static-red-50);
+  color: var(--dsw-static-red-600);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.field-head .key {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.field-head .desc {
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+button.primary {
+  background: var(--dsw-static-deepseek-500);
+  border-color: var(--dsw-static-deepseek-500);
+  color: var(--dsw-static-neutral-bluish-00);
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--dsw-static-deepseek-600);
+  border-color: var(--dsw-static-deepseek-600);
+}
+
+button.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

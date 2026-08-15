@@ -1,4 +1,5 @@
 node_modules/
 lib/
+panel/dist/
 *.tgz
 .DS_Store

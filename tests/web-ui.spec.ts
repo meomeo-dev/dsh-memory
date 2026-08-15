@@ -1,0 +1,240 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import {
+  ASSET_PREFIX,
+  PANEL_CHANNEL,
+  assetContentType,
+  describeConfig,
+  generatePanelToken,
+  handlePanelRpc,
+  matchesPanelQuery,
+  panelPath,
+  panelUrl,
+  queryToken,
+  readPanelAsset,
+  renderPanelShell,
+  resolvePanelAsset,
+  safeTokenEqual,
+} from '../src/web-ui/ui.js'
+import type { PanelDeps } from '../src/web-ui/ui.js'
+import { CONFIG_KEYS, DEFAULT_CONFIG } from '../src/memory-runtime.js'
+import type { MemoryEntry } from '../src/schema.js'
+
+function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+  return {
+    id: 'm-0000000000',
+    schemaVersion: 2,
+    createdAt: 1750000000000,
+    type: 'rules',
+    domain: 'DurablePrefs',
+    scope: '全项目',
+    layer: 'user',
+    entry: '提交信息用 Conventional Commits',
+    entryPoint: '-',
+    references: '-',
+    ...overrides,
+  }
+}
+
+function makeDeps(overrides: Partial<PanelDeps> = {}): PanelDeps {
+  return {
+    entries: () => [],
+    getConfig: () => describeConfig(DEFAULT_CONFIG),
+    setConfig: async () => describeConfig(DEFAULT_CONFIG),
+    ...overrides,
+  }
+}
+
+let panelDir: string
+
+beforeEach(() => {
+  panelDir = mkdtempSync(join(tmpdir(), 'dsh-memory-panel-'))
+  mkdirSync(panelDir, { recursive: true })
+  writeFileSync(join(panelDir, 'panel.js'), 'console.log("panel")', 'utf8')
+})
+
+afterEach(() => {
+  rmSync(panelDir, { recursive: true, force: true })
+})
+
+describe('panel token', () => {
+  it('generates a 64-char hex token, unique per call', () => {
+    const token = generatePanelToken()
+    expect(token).toMatch(/^[0-9a-f]{64}$/)
+    expect(generatePanelToken()).not.toBe(token)
+  })
+
+  it('compares tokens in constant time, including length mismatch', () => {
+    const token = generatePanelToken()
+    expect(safeTokenEqual(token, token)).toBe(true)
+    expect(safeTokenEqual(token, generatePanelToken())).toBe(false)
+    expect(safeTokenEqual('short', token)).toBe(false)
+    expect(safeTokenEqual(token, 'short')).toBe(false)
+    expect(safeTokenEqual('', '')).toBe(true)
+  })
+
+  it('extracts ac_token from request URLs', () => {
+    expect(queryToken('/memory?ac_token=abc123')).toBe('abc123')
+    expect(queryToken('/memory?ac_token=abc123&x=1')).toBe('abc123')
+    expect(queryToken('/memory')).toBeUndefined()
+    expect(queryToken(undefined)).toBeUndefined()
+  })
+})
+
+describe('panel URLs', () => {
+  it('builds page paths and token-bearing URLs', () => {
+    expect(panelPath('memory')).toBe('/memory')
+    expect(panelPath('settings')).toBe('/memory/settings')
+    expect(panelUrl(39140, 'memory', 'tok')).toBe('http://127.0.0.1:39140/memory?ac_token=tok')
+    expect(panelUrl(39140, 'settings', 'tok')).toBe('http://127.0.0.1:39140/memory/settings?ac_token=tok')
+  })
+})
+
+describe('asset serving', () => {
+  it('resolves a whitelisted single-segment asset inside the panel dir', () => {
+    const file = resolvePanelAsset(panelDir, `${ASSET_PREFIX}panel.js`)
+    expect(file).toBe(join(panelDir, 'panel.js'))
+    expect(readPanelAsset(panelDir, `${ASSET_PREFIX}panel.js`)?.toString('utf8')).toBe('console.log("panel")')
+  })
+
+  it('rejects path traversal, absolute paths, and unknown extensions', () => {
+    // '..' 段(含编码穿越解码后的形式)、分隔符、反斜杠一律拒绝。
+    expect(resolvePanelAsset(panelDir, `${ASSET_PREFIX}../secret.txt`)).toBeUndefined()
+    expect(resolvePanelAsset(panelDir, `${ASSET_PREFIX}..%2F..%2Fetc%2Fpasswd`)).toBeUndefined()
+    expect(resolvePanelAsset(panelDir, `${ASSET_PREFIX}a/b.js`)).toBeUndefined()
+    expect(resolvePanelAsset(panelDir, `${ASSET_PREFIX}a\\b.js`)).toBeUndefined()
+    expect(resolvePanelAsset(panelDir, '/etc/passwd')).toBeUndefined()
+    expect(resolvePanelAsset(panelDir, `${ASSET_PREFIX}secret.exe`)).toBeUndefined()
+    expect(resolvePanelAsset(panelDir, `${ASSET_PREFIX}`)).toBeUndefined()
+  })
+
+  it('maps extensions to content types', () => {
+    expect(assetContentType('panel.js')).toContain('javascript')
+    expect(assetContentType('style.css')).toContain('css')
+    expect(assetContentType('panel.js.map')).toContain('json')
+    expect(assetContentType('icon.svg')).toContain('svg')
+    expect(assetContentType('icon.png')).toBe('image/png')
+    expect(assetContentType('font.woff2')).toBe('font/woff2')
+    expect(assetContentType('x.bin')).toBe('application/octet-stream')
+  })
+})
+
+describe('panel HTML shell', () => {
+  it('emits a CSP-tightened shell with the bootstrap JSON and token-bearing asset URLs', () => {
+    const html = renderPanelShell({ page: 'memory', token: 'tok-64', channel: PANEL_CHANNEL })
+    expect(html).toContain('Content-Security-Policy')
+    expect(html).toContain("default-src 'none'")
+    expect(html).toContain('id="dsh-memory-bootstrap"')
+    expect(html).toContain('?ac_token=tok-64')
+    expect(html).toContain('<div id="root"></div>')
+    const match = /<script id="dsh-memory-bootstrap" type="application\/json">([^<]*)<\/script>/.exec(html)
+    expect(match).not.toBeNull()
+    expect(JSON.parse(match![1]!)).toEqual({ page: 'memory', token: 'tok-64', channel: '/memory-api' })
+  })
+
+  it('escapes `<` in the bootstrap JSON so content cannot break the script boundary', () => {
+    const html = renderPanelShell({ page: 'memory', token: '<evil>', channel: PANEL_CHANNEL })
+    expect(html).not.toContain('"token":"<evil>"')
+    // 只需转义 `<`(`</script` 终止符);`>` 不破坏 script 边界,保持原样。
+    expect(html).toContain('\\u003cevil>')
+  })
+})
+
+describe('settings page description', () => {
+  it('describes exactly the 13 config keys with a label, description, and control kind', () => {
+    const items = describeConfig(DEFAULT_CONFIG)
+    expect(items.map(item => item.key)).toEqual([...CONFIG_KEYS])
+    for (const item of items) {
+      expect(item.meta.label).toBeTruthy()
+      expect(item.meta.description).toBeTruthy()
+      expect(['number', 'boolean', 'enum', 'string', 'textarea']).toContain(item.meta.kind)
+      if (item.meta.kind === 'enum') expect(item.meta.options).toBeDefined()
+    }
+  })
+})
+
+describe('matchesPanelQuery', () => {
+  it('matches entry, scope, and domain case-insensitively', () => {
+    expect(matchesPanelQuery(entry(), 'conventional')).toBe(true)
+    expect(matchesPanelQuery(entry(), '全项目')).toBe(true)
+    expect(matchesPanelQuery(entry(), 'durableprefs')).toBe(true)
+    expect(matchesPanelQuery(entry(), '不存在的词')).toBe(false)
+  })
+})
+
+describe('handlePanelRpc', () => {
+  const token = generatePanelToken()
+
+  it('rejects requests without a valid acToken before touching deps', async () => {
+    const result = await handlePanelRpc('entries', {}, token, makeDeps())
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('bad-request')
+      expect(result.error.message).toContain('acToken')
+    }
+    const wrong = await handlePanelRpc('entries', { acToken: 'wrong' }, token, makeDeps())
+    expect(wrong.ok).toBe(false)
+  })
+
+  it('rejects malformed payloads and unknown endpoints', async () => {
+    const bad = await handlePanelRpc('entries', { acToken: token, filters: { type: 'state' } }, token, makeDeps())
+    expect(bad.ok).toBe(false)
+    const unknown = await handlePanelRpc('delete-everything', { acToken: token }, token, makeDeps())
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('bad-request')
+  })
+
+  it('serves entries with filters passed through to the deps', async () => {
+    let received: { cwd?: string; filters?: unknown } = {}
+    const deps = makeDeps({
+      entries: (cwd, filters) => {
+        received = { cwd, filters }
+        return [{ entry: entry(), file: '2026-08-13.rules.remember.jsonl' }]
+      },
+    })
+    const result = await handlePanelRpc('entries', {
+      acToken: token,
+      cwd: '/proj',
+      filters: { type: 'rules', domain: 'DurablePrefs', layer: 'user', query: '提交' },
+    }, token, deps)
+    expect(result.ok).toBe(true)
+    expect(received).toEqual({
+      cwd: '/proj',
+      filters: { type: 'rules', domain: 'DurablePrefs', layer: 'user', query: '提交' },
+    })
+    if (result.ok) {
+      const value = result.value as { entries: Array<{ entry: MemoryEntry; file: string }> }
+      expect(value.entries[0]!.file).toBe('2026-08-13.rules.remember.jsonl')
+      expect(value.entries[0]!.entry.createdAt).toBe(1750000000000)
+    }
+  })
+
+  it('reads and writes config through the deps', async () => {
+    const get = await handlePanelRpc('config-get', { acToken: token }, token, makeDeps())
+    expect(get.ok).toBe(true)
+    if (get.ok) expect((get.value as { config: unknown[] }).config).toHaveLength(13)
+
+    let patchSeen: Record<string, unknown> | undefined
+    const setDeps = makeDeps({
+      setConfig: async (patch) => {
+        patchSeen = patch
+        return describeConfig(DEFAULT_CONFIG)
+      },
+    })
+    const set = await handlePanelRpc('config-set', { acToken: token, patch: { maxNodeKb: 800 } }, token, setDeps)
+    expect(set.ok).toBe(true)
+    expect(patchSeen).toEqual({ maxNodeKb: 800 })
+  })
+
+  it('folds dependency failures into an internal error', async () => {
+    const deps = makeDeps({ entries: () => { throw new Error('disk gone') } })
+    const result = await handlePanelRpc('entries', { acToken: token }, token, deps)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('internal')
+      expect(result.error.message).toBe('disk gone')
+    }
+  })
+})

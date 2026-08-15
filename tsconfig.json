@@ -13,5 +13,6 @@
     "esModuleInterop": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "migrations"]
+  "include": ["src", "migrations"],
+  "exclude": ["src/web-ui/panel"]
 }
