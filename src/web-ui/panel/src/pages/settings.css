@@ -1,0 +1,53 @@
+/*
+ * 设置页样式:配置项表单(键 + 描述 + 控件 + 保存行)。
+ * 表单控件基础外观见 ../styles.css(select/input/textarea)。
+ */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.field-head .key {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.field-head .desc {
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+}
+
+/* 保存行里的独立描述文本(非 field-head 内)。 */
+.desc {
+  font-size: 12px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}

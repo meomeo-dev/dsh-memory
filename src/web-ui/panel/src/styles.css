@@ -1,8 +1,11 @@
 /*
+ * 面板共享基础样式:设计令牌镜像 + 布局壳 + 通用组件(card/table/badge/按钮等)。
+ *
  * 设计令牌镜像自 @deepseek-ai/dsh-client-ui-theme 的
  * styles/design-platform.css(--dsw-static-* 色板 + --dsw-alias-* 别名,light 主题)
  * 与 styles/base.css(字体栈 / 缓动曲线)。面板是独立页,不加载 dsh SPA 的样式表,
  * 故按值镜像子集;上游改值需同步此处(漂移只影响视觉,不影响功能)。
+ * 图表样式见 charts.css;页面专属样式见 pages/*.css。
  */
 :root {
   --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
@@ -33,6 +36,7 @@
   --dsw-static-deepseek-50: rgb(237, 243, 254);
   --dsw-static-deepseek-100: rgb(228, 237, 253);
   --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-300: rgb(183, 200, 254);
   --dsw-static-deepseek-400: rgb(103, 158, 254);
   --dsw-static-deepseek-500: rgb(65, 118, 230);
   --dsw-static-deepseek-600: rgb(72, 104, 178);
@@ -64,16 +68,6 @@
   --dsw-alias-state-error-primary: var(--dsw-static-red-600);
   --dsw-alias-state-success-primary: var(--dsw-static-green-500);
   --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
-
-  /* 图表轨道色(纯 SVG 图表用,无外部图表库)。 */
-  --chart-track: var(--dsw-static-neutral-bluish-75);
-
-  /* 热力图 5 档强度(deepseek 蓝系,透明度递增)。 */
-  --heat-0: var(--dsw-static-neutral-bluish-75);
-  --heat-1: var(--dsw-static-deepseek-100);
-  --heat-2: var(--dsw-static-deepseek-300);
-  --heat-3: var(--dsw-static-deepseek-500);
-  --heat-4: var(--dsw-static-deepseek-800);
 }
 
 * {
@@ -154,83 +148,6 @@ a.tab:hover {
   max-width: 720px;
 }
 
-/* 过滤条:白卡片 + 输入控件。 */
-.filter-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px;
-  background: var(--dsw-alias-bg-layer-2);
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-}
-
-.filter-bar input[type='search'] {
-  flex: 1;
-  min-width: 200px;
-}
-
-.filter-bar select,
-.filter-bar input,
-.form select,
-.form input[type='text'],
-.form input[type='number'],
-.form textarea {
-  font-family: var(--dsw-font-family);
-  font-size: 13px;
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-base);
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 6px;
-  padding: 6px 10px;
-  outline: none;
-  transition: border-color var(--ds-transition-duration) var(--ds-ease-in-out);
-}
-
-.filter-bar select:focus,
-.filter-bar input:focus,
-.form select:focus,
-.form input:focus,
-.form textarea:focus {
-  border-color: var(--dsw-static-deepseek-500);
-}
-
-.count {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.layout-toggle {
-  display: flex;
-  gap: 4px;
-}
-
-.layout-toggle button,
-button.primary {
-  font-family: var(--dsw-font-family);
-  font-size: 13px;
-  border-radius: 6px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-base);
-  color: var(--dsw-alias-label-secondary);
-  padding: 5px 12px;
-  cursor: pointer;
-  transition: all var(--ds-transition-duration) var(--ds-ease-in-out);
-}
-
-.layout-toggle button:hover {
-  border-color: var(--dsw-alias-border-l3);
-  color: var(--dsw-alias-label-primary);
-}
-
-.layout-toggle button.active {
-  background: var(--dsw-static-deepseek-50);
-  border-color: var(--dsw-static-deepseek-500);
-  color: var(--dsw-static-deepseek-600);
-}
-
 /* 卡片与表格。 */
 .card {
   background: var(--dsw-alias-bg-layer-2);
@@ -265,71 +182,25 @@ button.primary {
   font-size: 12px;
 }
 
-.time {
+.meta {
   color: var(--dsw-alias-label-caption);
   font-size: 12px;
-  font-family: var(--ds-font-family-code);
-  white-space: nowrap;
 }
 
-.badges {
-  display: inline-flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.badge {
-  display: inline-block;
-  font-size: 12px;
-  line-height: 1;
-  padding: 3px 8px;
-  border-radius: 999px;
-}
-
-.badge.rules {
-  background: var(--dsw-static-deepseek-50);
-  color: var(--dsw-static-deepseek-600);
-}
-
-.badge.lessons {
-  background: var(--dsw-static-amber-100);
-  color: var(--dsw-static-amber-600);
-}
-
-.badge.domain {
-  background: var(--dsw-static-neutral-bluish-75);
-  color: var(--dsw-alias-label-secondary);
-}
-
-.badge.layer {
-  background: var(--dsw-alias-bg-base);
-  border: 1px solid var(--dsw-alias-border-l2);
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.timeline section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.day {
-  margin: 0;
-  font-size: 13px;
+.section-title {
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
 }
 
-.day-count {
-  font-weight: 400;
-  color: var(--dsw-alias-label-caption);
+.chip {
+  display: inline-block;
+  font-family: var(--ds-font-family-code);
   font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--dsw-static-deepseek-50);
+  color: var(--dsw-static-deepseek-600);
 }
 
 .table-wrap {
@@ -377,7 +248,7 @@ td.entry-cell {
   max-width: 280px;
 }
 
-/* 空态 / 提示 / 表单。 */
+/* 空态 / 提示 / 按钮 / 徽标。 */
 .empty {
   padding: 48px 20px;
   text-align: center;
@@ -403,54 +274,17 @@ td.entry-cell {
   color: var(--dsw-static-red-600);
 }
 
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.field-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.field-head .key {
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-}
-
-.field-head .desc {
-  color: var(--dsw-alias-label-caption);
-  font-size: 12px;
-}
-
-.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--dsw-alias-label-primary);
-  cursor: pointer;
-}
-
-.form-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-top: 4px;
-}
-
 button.primary {
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-static-deepseek-500);
   background: var(--dsw-static-deepseek-500);
-  border-color: var(--dsw-static-deepseek-500);
   color: var(--dsw-static-neutral-bluish-00);
   font-weight: 500;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 button.primary:hover:not(:disabled) {
@@ -461,19 +295,6 @@ button.primary:hover:not(:disabled) {
 button.primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-/* 状态页。 */
-.status-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.status-title {
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
 }
 
 .refresh {
@@ -493,57 +314,63 @@ button.primary:disabled {
   color: var(--dsw-alias-label-primary);
 }
 
-.section-title {
-  font-weight: 600;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+.refresh.danger {
+  color: var(--dsw-alias-state-error-primary);
 }
 
-.chip {
+.refresh.danger:hover {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.badges {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.badge {
   display: inline-block;
-  font-family: var(--ds-font-family-code);
   font-size: 12px;
-  padding: 3px 10px;
+  line-height: 1;
+  padding: 3px 8px;
   border-radius: 999px;
+}
+
+.badge.rules {
   background: var(--dsw-static-deepseek-50);
   color: var(--dsw-static-deepseek-600);
 }
 
-.status-card header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
+.badge.lessons {
+  background: var(--dsw-static-amber-100);
+  color: var(--dsw-static-amber-600);
 }
 
-.team-row {
+.badge.domain {
+  background: var(--dsw-static-neutral-bluish-75);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.badge.layer {
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 页头行(标题 + 主操作)与指标块:状态页/目录页共用。 */
+.status-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
 
-.team-row:last-child {
-  border-bottom: none;
+.status-title {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
 }
 
-.team-root {
-  color: var(--dsw-alias-label-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.team-nodes {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-/* 统计指标块。 */
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -572,260 +399,25 @@ button.primary:disabled {
   color: var(--dsw-alias-label-caption);
 }
 
-/* usage 图表。 */
-.charts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
-}
-
-/* 整行大图(每日用量 / 日历热力图),不与三列小图混排。 */
-.charts-wide {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.chart-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.donut-wrap {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.donut {
-  width: 140px;
-  height: 140px;
-  flex: none;
-}
-
-.donut-center {
-  font-size: 20px;
-  font-weight: 600;
-  fill: var(--dsw-alias-label-primary);
-}
-
-.donut-sub {
-  font-size: 11px;
-  fill: var(--dsw-alias-label-caption);
-}
-
-.legend {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.legend-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.legend-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  flex: none;
-}
-
-.legend-label {
-  flex: 1 1 auto;
-}
-
-.legend-value {
-  color: var(--dsw-alias-label-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.bars {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* 每组的纵向排布:组/类 label → 水平条 → 指标 label,避免单行挤压溢出。 */
-.bar-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.bar-label {
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.bar-track {
-  width: 100%;
-  display: flex;
-  height: 14px;
-  border-radius: 4px;
-  background: var(--dsw-static-neutral-bluish-75);
-  overflow: hidden;
-}
-
-.bar-seg {
-  display: block;
-  height: 100%;
-  transition: width var(--ds-transition-duration) var(--ds-ease-in-out);
-}
-
-.bar-metric {
-  font-size: 12px;
-  color: var(--dsw-alias-label-caption);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 紧凑水平条形图(整行大图):日期 | 条 | 总 token,单行一项。 */
-.hbars {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.hbar-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.hbar-label {
-  flex: 0 0 44px;
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.hbar-track {
-  flex: 1 1 auto;
-  display: flex;
-  height: 16px;
-  border-radius: 4px;
-  background: var(--dsw-static-neutral-bluish-75);
-  overflow: hidden;
-}
-
-.hbar-seg {
-  display: block;
-  height: 100%;
-  transition: width var(--ds-transition-duration) var(--ds-ease-in-out);
-}
-
-.hbar-metric {
-  flex: 0 0 56px;
-  text-align: right;
-  font-size: 12px;
-  color: var(--dsw-alias-label-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 目录页。 */
-.add-root {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.add-root-row {
-  display: flex;
-  gap: 8px;
-}
-
-.add-root-input {
-  flex: 1 1 auto;
-}
-
-.root-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.root-card header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 0;
-}
-
-.root-path {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 表单控件基础(设置页/目录页输入共用)。 */
+select,
+input[type='text'],
+input[type='number'],
+input[type='search'],
+textarea {
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
   color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
-.state-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.state-dot.ok {
-  background: var(--dsw-static-green-500);
-}
-
-.state-dot.gone {
-  background: var(--dsw-alias-label-caption);
-}
-
-.root-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.refresh.danger {
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.refresh.danger:hover {
-  border-color: var(--dsw-alias-state-error-primary);
-  color: var(--dsw-alias-state-error-primary);
-}
-
-/* 日历热力图(列=周,行=周一..周日)。 */
-.heatmap-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.heatmap {
-  display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(7, 12px);
-  gap: 3px;
-}
-
-.heat-cell {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-}
-
-.heat-cell.out {
-  opacity: 0.25;
-}
-
-.heat-legend {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.heat-legend-label {
-  font-size: 12px;
-  color: var(--dsw-alias-label-caption);
-  margin: 0 4px;
+select:focus,
+input:focus,
+textarea:focus {
+  border-color: var(--dsw-static-deepseek-500);
 }

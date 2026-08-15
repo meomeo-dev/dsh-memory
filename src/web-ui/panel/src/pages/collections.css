@@ -1,0 +1,62 @@
+/*
+ * 目录页样式:登记表单 + 记忆根卡片(路径 / 状态点 / 操作行)。
+ * 共享基础(卡片/表格/徽标/指标块)见 ../styles.css。
+ */
+
+.add-root {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.add-root-row {
+  display: flex;
+  gap: 8px;
+}
+
+.add-root-input {
+  flex: 1 1 auto;
+}
+
+.root-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.root-card header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.root-path {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 目录存在性状态点:绿 = 可见,灰 = 已消失(保留最后已知计数)。 */
+.state-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.state-dot.ok {
+  background: var(--dsw-static-green-500);
+}
+
+.state-dot.gone {
+  background: var(--dsw-alias-label-caption);
+}
+
+.root-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

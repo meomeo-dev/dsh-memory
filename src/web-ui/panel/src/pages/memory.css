@@ -1,0 +1,88 @@
+/*
+ * 记忆页样式:过滤条 + 布局切换 + Timeline 分组。
+ * 共享基础(卡片/表格/徽标)见 ../styles.css。
+ */
+
+/* 过滤条:白卡片 + 输入控件。 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.filter-bar input[type='search'] {
+  flex: 1;
+  min-width: 200px;
+}
+
+.count {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.layout-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.layout-toggle button {
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.layout-toggle button:hover {
+  border-color: var(--dsw-alias-border-l3);
+  color: var(--dsw-alias-label-primary);
+}
+
+.layout-toggle button.active {
+  background: var(--dsw-static-deepseek-50);
+  border-color: var(--dsw-static-deepseek-500);
+  color: var(--dsw-static-deepseek-600);
+}
+
+/* Timeline:按本地日期分组的卡片列。 */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.timeline section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.day {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.day-count {
+  font-weight: 400;
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+}
+
+.time {
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  font-family: var(--ds-font-family-code);
+  white-space: nowrap;
+}

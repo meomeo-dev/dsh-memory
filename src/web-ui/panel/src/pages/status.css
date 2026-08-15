@@ -1,0 +1,58 @@
+/*
+ * 状态页样式:team 状态卡 + 图表区布局(三张小图并列 / 两张整行大图)。
+ * 图表组件自身样式见 ../charts.css;指标块见 ../styles.css(.metric-*)。
+ */
+
+.status-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.team-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.team-row:last-child {
+  border-bottom: none;
+}
+
+.team-root {
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-nodes {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* usage 图表:三张小图并列(窄屏自动折行)。 */
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+/* 整行大图(每日用量 / 日历热力图),不与三列小图混排。 */
+.charts-wide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}

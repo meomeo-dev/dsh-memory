@@ -1,0 +1,186 @@
+/*
+ * 图表样式:甜甜圈 / 堆叠条 / 对比条 / 每日水平条 / 日历热力图。
+ * 图表配色在 charts.tsx 的 CHART_COLORS(镜像 dsh 设计令牌);
+ * 此处定义轨道底色与热力五档。共享基础样式见 styles.css。
+ */
+:root {
+  --chart-track: var(--dsw-static-neutral-bluish-75);
+  --heat-0: var(--dsw-static-neutral-bluish-75);
+  --heat-1: var(--dsw-static-deepseek-100);
+  --heat-2: var(--dsw-static-deepseek-300);
+  --heat-3: var(--dsw-static-deepseek-500);
+  --heat-4: var(--dsw-static-deepseek-800);
+}
+
+/* 甜甜圈:左图右图例。 */
+.donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.donut {
+  width: 140px;
+  height: 140px;
+  flex: none;
+}
+
+.donut-center {
+  font-size: 20px;
+  font-weight: 600;
+  fill: var(--dsw-alias-label-primary);
+}
+
+.donut-sub {
+  font-size: 11px;
+  fill: var(--dsw-alias-label-caption);
+}
+
+/* 图例(甜甜圈旁 / 条形图下方共用,竖排)。 */
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.legend-label {
+  flex: 1 1 auto;
+}
+
+.legend-value {
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 堆叠 / 对比条:每组的纵向排布(组/类 label → 水平条 → 指标),避免单行挤压溢出。 */
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bar-label {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.bar-track {
+  width: 100%;
+  display: flex;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--dsw-static-neutral-bluish-75);
+  overflow: hidden;
+}
+
+.bar-seg {
+  display: block;
+  height: 100%;
+  transition: width var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.bar-metric {
+  font-size: 12px;
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 紧凑水平条形图(近 14 天每日用量,整行大图):日期 | 条 | 总 token,单行一项。 */
+.hbars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hbar-label {
+  flex: 0 0 44px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.hbar-track {
+  flex: 1 1 auto;
+  display: flex;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--dsw-static-neutral-bluish-75);
+  overflow: hidden;
+}
+
+.hbar-seg {
+  display: block;
+  height: 100%;
+  transition: width var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.hbar-metric {
+  flex: 0 0 56px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 日历热力图(列=周,行=周一..周日)。 */
+.heatmap-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 12px);
+  gap: 3px;
+}
+
+.heat-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.heat-cell.out {
+  opacity: 0.25;
+}
+
+.heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.heat-legend-label {
+  font-size: 12px;
+  color: var(--dsw-alias-label-caption);
+  margin: 0 4px;
+}
