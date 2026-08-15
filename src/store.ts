@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { checkMarkdown } from './check.js'
-import { visibleMemoryDirs, writeRootFor } from './memory-file.js'
+import { builtinMemoryDir, visibleMemoryDirs, writeRootFor } from './memory-file.js'
 import type { MemoryFile } from './memory-file.js'
 import { readJsonlMigrating, serializeEntry } from './migrate.js'
 import { renderMd } from './render.js'
@@ -380,10 +380,14 @@ export function findIn(dirs: readonly string[], query: FindQuery): FoundEntry[] 
 /**
  * 重建全部可见层的 `catalog.json`:扫描所有可见 `.remember.jsonl`(顺带做旧数据
  * 迁移),以 jsonl 为准全量重写 catalog(不一致时 jsonl 权威)。手动编辑 jsonl 后的一键对齐。
- * @param cwd - 当前工作目录;缺省只重建内置 + 用户级。
+ *
+ * 内置层只读:它是随包发布、可能在只读安装目录里的种子数据,不在重建范围;
+ * 用户层与项目层照常重建。
+ * @param cwd - 当前工作目录;缺省只重建用户级。
  */
 export function rebuild(cwd?: string): void {
   for (const dir of visibleMemoryDirs(cwd)) {
+    if (dir === builtinMemoryDir()) continue
     if (!existsSync(dir)) continue
     writeCatalog(dir, loadDirMigrating(dir))
   }

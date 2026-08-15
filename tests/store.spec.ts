@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { checkMarkdown } from '../src/check.js'
-import { memoryWriteRoots } from '../src/memory-file.js'
+import { builtinMemoryDir, memoryWriteRoots } from '../src/memory-file.js'
 import { isMemoryId } from '../src/schema.js'
 import type { MemoryEntryInput, MemoryId } from '../src/schema.js'
 import { append, find, findIn, rebuild, remove, removeByEntry, update } from '../src/store.js'
@@ -219,6 +219,15 @@ describe('findIn', () => {
 })
 
 describe('legacy migration + rebuild', () => {
+  it('never writes catalog.json into the read-only builtin layer', () => {
+    const builtin = builtinMemoryDir()
+    const path = join(builtin, 'catalog.json')
+    const before = existsSync(path)
+    rebuild(project)
+    expect(existsSync(path)).toBe(before) // rebuild 不碰内置层(只读种子)
+  })
+
+
   it('migrates id-less rows on read and rebuilds the catalog from jsonl', () => {
     const dir = memoryWriteRoots(project).user
     mkdirSync(dir, { recursive: true })

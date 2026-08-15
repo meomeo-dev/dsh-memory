@@ -114,7 +114,7 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
     usage: 'catalog rebuild',
     summary: '从全部 jsonl 重建 catalog(派生索引)。',
     details: [
-      '行为:全量重写全部可见层(内置 + 用户 + 当前项目)的 catalog.json;真相源仍是 jsonl。',
+      '行为:全量重写用户层 + 当前项目层的 catalog.json;真相源仍是 jsonl;内置层只读,不重建。',
       '示例:/lmemory catalog rebuild',
     ],
   }],
