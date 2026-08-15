@@ -234,7 +234,11 @@
 }
 
 .heatmap-table {
+  /* fixed 布局:12 数据列均分卡片宽度,忽略内容 min-content——
+     否则 auto 布局按格子内容撑列,表格远超卡片(实测 729px vs 454px)。 */
+  table-layout: fixed;
   width: 100%;
+  max-width: 100%;
   border-collapse: separate;
   border-spacing: 3px;
 }

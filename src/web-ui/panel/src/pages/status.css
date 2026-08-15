@@ -51,11 +51,17 @@
   gap: 12px;
 }
 
-/* 两列并排小图:今天(按日期)消耗 + 日历热力图(热力图缩成半宽小图;窄屏折行)。 */
+/* 两列并排小图:今天(按日期)消耗 + 日历热力图(热力图缩成半宽小图;窄屏折行)。
+   min-width: 0 让卡片可收缩到轨道宽度——grid 子项默认 min-width auto 会被
+   内容(热力图表格)撑破轨道。 */
 .charts-pair {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 12px;
+}
+
+.charts-pair .chart-card {
+  min-width: 0;
 }
 
 /* 明细表的按小时二级表(与每日图选中天联动)。 */
