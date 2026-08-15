@@ -67,6 +67,13 @@
 
   /* 图表轨道色(纯 SVG 图表用,无外部图表库)。 */
   --chart-track: var(--dsw-static-neutral-bluish-75);
+
+  /* 热力图 5 档强度(deepseek 蓝系,透明度递增)。 */
+  --heat-0: var(--dsw-static-neutral-bluish-75);
+  --heat-1: var(--dsw-static-deepseek-100);
+  --heat-2: var(--dsw-static-deepseek-300);
+  --heat-3: var(--dsw-static-deepseek-500);
+  --heat-4: var(--dsw-static-deepseek-800);
 }
 
 * {
@@ -669,4 +676,40 @@ button.primary:disabled {
   font-size: 12px;
   color: var(--dsw-alias-label-caption);
   font-variant-numeric: tabular-nums;
+}
+
+/* 日历热力图(列=周,行=周一..周日)。 */
+.heatmap-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 12px);
+  gap: 3px;
+}
+
+.heat-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.heat-cell.out {
+  opacity: 0.25;
+}
+
+.heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.heat-legend-label {
+  font-size: 12px;
+  color: var(--dsw-alias-label-caption);
+  margin: 0 4px;
 }

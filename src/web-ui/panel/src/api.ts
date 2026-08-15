@@ -55,6 +55,24 @@ export interface Filters {
   readonly query?: string
 }
 
+/** 某一天某一职责的聚合(镜像 host 侧 DashboardLabelUsage)。 */
+export interface LabelDayUsage {
+  readonly calls: number
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens: number
+  readonly totalTokens: number
+}
+
+/** 某一天的聚合(镜像 host 侧 DashboardDaily)。 */
+export interface DayUsage {
+  readonly day: string
+  readonly recall: LabelDayUsage
+  readonly extract: LabelDayUsage
+  readonly review: LabelDayUsage
+  readonly total: number
+}
+
 /** 状态页视图模型(与 host 侧 DashboardDto 同构)。 */
 export interface Dashboard {
   readonly status: {
@@ -82,6 +100,8 @@ export interface Dashboard {
       readonly outputTokens: number
       readonly cacheReadTokens: number
     }[]
+    /** 近 84 天按日聚合(升序,零填充)。 */
+    readonly daily: readonly DayUsage[]
   }
 }
 

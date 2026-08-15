@@ -33,7 +33,8 @@ POST /memory-api/entries    { acToken, cwd?, filters?: { type?, domain?, layer?,
 POST /memory-api/dashboard-get { acToken, cwd? } → { dashboard: { status, stats, usage } }
   状态页一次取齐的视图模型:team 状态(maxNodeKb + 各 root 节点数)、记忆统计
   (总条目 / rules / lessons / 各层 / domain 分布 / 文件字节 / catalog)、token 用量
-  (预热 team 与摘要的估算 + 本进程 recall/extract/review 调用消耗)。
+  (预热 team 与摘要的估算 + 本进程 recall/extract/review 调用消耗 + 近 84 天
+  usage.jsonl 按日聚合,供每日柱状图与日历热力图)。
 POST /memory-api/config-get { acToken } → { config: [{ key, meta, value }] }(13 键,按 CONFIG_KEYS 顺序)
 POST /memory-api/config-set { acToken, patch } → 经 settings scope 校验并 applyConfig,返回写后 config
 ```
@@ -45,7 +46,7 @@ RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload
 ## 页面
 
 - **记忆页**:顶部筛选组件(全文搜索 entry/scope/domain + type/domain/layer 下拉 + 计数),正文区 Timeline / Table 两种布局切换。Timeline 按创建日期分组(降序),卡片含 type/domain/layer 徽标、条目文本、scope/file/entryPoint/references 溯源;Table 平铺全部 10 列。
-- **状态页**:三区结构——顶部 team 状态(各 root 的已预热节点数 + maxNodeKb chip)、中部统计指标块(总条目 / rules / lessons / 各层 / 领域数 / 文件 / jsonl 与 md 体积 / catalog,网格卡片)、正文 usage 图表。图表为纯 SVG/div(零外部图表库,满足 CSP `default-src 'none'`):token 分布甜甜圈(按职责)、LLM 调用消耗堆叠条(输入/输出/缓存读)、静态上下文成本对比条;下方附用量明细表。带「刷新」按钮重取 `dashboard-get`。
+- **状态页**:三区结构——顶部 team 状态(各 root 的已预热节点数 + maxNodeKb chip)、中部统计指标块(总条目 / rules / lessons / 各层 / 领域数 / 文件 / jsonl 与 md 体积 / catalog,网格卡片)、正文 usage 图表。图表为纯 SVG/div(零外部图表库,满足 CSP `default-src 'none'`):token 分布甜甜圈(按职责)、LLM 调用消耗堆叠条(输入/输出/缓存读)、静态上下文成本对比条、近 14 天每日堆叠柱状图、近 12 周日历热力图(5 档强度,deepseek 蓝);下方附用量明细表。带「刷新」按钮重取 `dashboard-get`。
 - **设置页**:13 个配置键的表单,按 kind 出控件(number / boolean / enum / string / textarea),统一「保存」提交 config-set,成功/失败横幅反馈。键集合与展示元数据在 `src/web-ui/ui.ts` 的 `PANEL_CONFIG_META`(测试锁定与 `CONFIG_KEYS` 不漂移)。
 
 ## 代码组织与构建

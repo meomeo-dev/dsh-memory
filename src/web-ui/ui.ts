@@ -311,6 +311,28 @@ export interface DashboardUsageRow {
   readonly cacheReadTokens: number
 }
 
+/** 状态页某一天某一职责的聚合(镜像 usage-log 的 LabelDayUsage)。 */
+export interface DashboardLabelUsage {
+  /** 当日调用次数。 */
+  readonly calls: number
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens: number
+  /** 当日该职责 token 合计。 */
+  readonly totalTokens: number
+}
+
+/** 状态页某一天的聚合(镜像 usage-log 的 DayUsage)。 */
+export interface DashboardDaily {
+  /** 本地日期 `YYYY-MM-DD`。 */
+  readonly day: string
+  readonly recall: DashboardLabelUsage
+  readonly extract: DashboardLabelUsage
+  readonly review: DashboardLabelUsage
+  /** 当日全部 token 合计。 */
+  readonly total: number
+}
+
 /** 状态页的完整视图模型(status / stats / usage 三区,一次 RPC 取齐)。 */
 export interface DashboardDto {
   /** 顶部:记忆 team 状态。 */
@@ -340,7 +362,7 @@ export interface DashboardDto {
     /** catalog 条目总数。 */
     readonly catalogEntries: number
   }
-  /** 正文:token 用量(静态上下文估算 + 动态 LLM 调用消耗)。 */
+  /** 正文:token 用量(静态上下文估算 + 动态 LLM 调用消耗 + 每日聚合)。 */
   readonly usage: {
     /** 预热 team 的静态上下文成本。 */
     readonly warmTeams: { readonly nodes: number; readonly chars: number; readonly tokens: number }
@@ -348,6 +370,8 @@ export interface DashboardDto {
     readonly summary: { readonly chars: number; readonly tokens: number }
     /** 本进程 LLM 调用消耗(按职责分类)。 */
     readonly counters: readonly DashboardUsageRow[]
+    /** 近 84 天按日聚合(usage.jsonl,零填充,升序;柱状图取后 14 天,热力图用全部)。 */
+    readonly daily: readonly DashboardDaily[]
   }
 }
 

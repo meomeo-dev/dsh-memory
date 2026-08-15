@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DISPLAY, readBootstrap, rpc } from './api'
-import type { Bootstrap, ConfigItem, Dashboard, EntryRow, Filters } from './api'
+import type { Bootstrap, ConfigItem, Dashboard, DayUsage, EntryRow, Filters } from './api'
 
 /** 渲染本地时间 `YYYY-MM-DD HH:mm:ss`。 */
 function formatTime(epochMs: number): string {
@@ -342,6 +342,106 @@ function StaticBars({ usage }: { readonly usage: Dashboard['usage'] }): JSX.Elem
   )
 }
 
+/** 近 14 天堆叠柱状图:每天一列,recall/extract/review 三色分段。 */
+function DailyBars({ daily }: { readonly daily: readonly DayUsage[] }): JSX.Element {
+  const windowDays = daily.slice(-14)
+  const maxTotal = Math.max(1, ...windowDays.map(day => day.total))
+  const width = (value: number): string => `${(value / maxTotal) * 100}%`
+  const labelOf = (usage: DayUsage['recall']): number => usage.totalTokens
+  return (
+    <div className="bars">
+      {windowDays.map(day => (
+        <div className="bar-row" key={day.day}>
+          <span className="bar-label mono">{day.day.slice(5)}</span>
+          <div className="bar-track">
+            <span className="bar-seg" style={{ width: width(labelOf(day.recall)), background: CHART_COLORS.recall }} title={`recall ${day.recall.totalTokens.toLocaleString()}`} />
+            <span className="bar-seg" style={{ width: width(labelOf(day.extract)), background: CHART_COLORS.extract }} title={`extract ${day.extract.totalTokens.toLocaleString()}`} />
+            <span className="bar-seg" style={{ width: width(labelOf(day.review)), background: CHART_COLORS.review }} title={`review ${day.review.totalTokens.toLocaleString()}`} />
+          </div>
+          <span className="bar-metric">{day.total > 0 ? formatCompact(day.total) : '—'}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** 日总 token → 热力强度档(5 档)。 */
+function heatLevel(total: number): 0 | 1 | 2 | 3 | 4 {
+  if (total <= 0) return 0
+  if (total < 1_000) return 1
+  if (total < 10_000) return 2
+  if (total < 100_000) return 3
+  return 4
+}
+
+/** 热力档 → 底色(dsh deepseek 蓝系)。 */
+function heatColor(level: 0 | 1 | 2 | 3 | 4): string {
+  switch (level) {
+    case 0: return 'var(--heat-0)'
+    case 1: return 'var(--heat-1)'
+    case 2: return 'var(--heat-2)'
+    case 3: return 'var(--heat-3)'
+    default: return 'var(--heat-4)'
+  }
+}
+
+/** 把 `YYYY-MM-DD` 解析为本地 Date(不带时刻)。 */
+function parseDay(day: string): Date {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(y!, m! - 1, d!)
+}
+
+/** 本地日期 → `YYYY-MM-DD`。 */
+function dayKey(date: Date): string {
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
+}
+
+/** 近 12 周日历热力图(GitHub 风格:列=周,行=周一..周日,5 档强度)。 */
+function CalendarHeatmap({ daily }: { readonly daily: readonly DayUsage[] }): JSX.Element {
+  const byDay = useMemo(() => new Map(daily.map(day => [day.day, day])), [daily])
+  const today = daily.length > 0 ? parseDay(daily[daily.length - 1]!.day) : new Date()
+  const weeks = 12
+  const cells: { key: string; level: 0 | 1 | 2 | 3 | 4; title: string; inWindow: boolean }[] = []
+  for (let col = 0; col < weeks; col++) {
+    const weekEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (weeks - 1 - col) * 7)
+    for (let row = 0; row < 7; row++) {
+      const date = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate() - (6 - row))
+      const key = dayKey(date)
+      const bucket = byDay.get(key)
+      const inWindow = bucket !== undefined
+      const total = bucket?.total ?? 0
+      cells.push({
+        key: `${col}-${row}`,
+        level: inWindow ? heatLevel(total) : 0,
+        title: inWindow ? `${key}: ${total.toLocaleString()} tokens` : key,
+        inWindow,
+      })
+    }
+  }
+  return (
+    <div className="heatmap-wrap">
+      <div className="heatmap" role="img" aria-label="近 12 周每日 token 热力图">
+        {cells.map(cell => (
+          <span
+            key={cell.key}
+            className={`heat-cell${cell.inWindow ? '' : ' out'}`}
+            style={{ background: heatColor(cell.level) }}
+            title={cell.title}
+          />
+        ))}
+      </div>
+      <div className="heat-legend">
+        <span className="heat-legend-label">少</span>
+        {([0, 1, 2, 3, 4] as const).map(level => (
+          <span key={level} className="heat-cell" style={{ background: heatColor(level) }} />
+        ))}
+        <span className="heat-legend-label">多</span>
+      </div>
+    </div>
+  )
+}
+
 /** 状态页:顶部 team 状态 → 中部统计指标块 → 正文 usage 图表。 */
 function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JSX.Element {
   const [dashboard, setDashboard] = useState<Dashboard | undefined>(undefined)
@@ -435,6 +535,14 @@ function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JSX.Eleme
         <div className="card chart-card">
           <span className="section-title">静态上下文成本估算</span>
           <StaticBars usage={usage} />
+        </div>
+        <div className="card chart-card">
+          <span className="section-title">近 14 天每日用量</span>
+          <DailyBars daily={usage.daily} />
+        </div>
+        <div className="card chart-card">
+          <span className="section-title">近 12 周日历热力图</span>
+          <CalendarHeatmap daily={usage.daily} />
         </div>
       </section>
 

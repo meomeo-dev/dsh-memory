@@ -74,6 +74,8 @@ import {
 import type { ExtractFn, TranscriptMessage } from './extract.js'
 import { computeStats, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.js'
 import type { UsageCounter } from './stats.js'
+import { aggregateByDay, appendUsageRow, readUsageRows } from './usage-log.js'
+import type { UsageLogRow } from './usage-log.js'
 import { COMMAND_HELPS, USAGE, parseLmemoryCommand, renderHelp } from './command.js'
 import { exportCollections } from './collections.js'
 import { forgetRoot, isMemoryRoot, loadRegistry, refreshRegistry, registerExplicitRoot } from './registry.js'
@@ -211,6 +213,7 @@ async function callFlash(
     content: [{ type: 'text', text: prompt }],
   })
   let text = ''
+  let lastUsage: UsageLogRow | undefined
   for await (const chunk of ctx.llm.stream({
     provider: runtime.config.provider,
     model,
@@ -220,10 +223,19 @@ async function callFlash(
     if (chunk.type === 'text-delta') text += chunk.text
     else if (chunk.type === 'usage') {
       runtime.usage.set(label, recordUsage(runtime.usage.get(label) ?? EMPTY_USAGE, chunk.usage))
+      // 一次调用聚合为一行持久化日志(流式通常只发一个 usage chunk,取最后一次)。
+      lastUsage = {
+        ts: Date.now(),
+        label,
+        inputTokens: chunk.usage.inputTokens,
+        outputTokens: chunk.usage.outputTokens,
+        cacheReadTokens: chunk.usage.cacheReadTokens ?? 0,
+      }
     } else if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
       throw new Error(`memory recall call failed: ${chunk.reason.failure.message}`)
     }
   }
+  if (lastUsage !== undefined) appendUsageRow(lastUsage)
   return text
 }
 
@@ -482,6 +494,18 @@ function renderStats(cwd: string | undefined, config: MemoryConfig): string {
   ].join('\n')
 }
 
+/** 渲染每日聚合表(`/lmemory usage --days N`)。 */
+function renderUsageDaily(rows: readonly UsageLogRow[], days: number): string {
+  const daily = aggregateByDay(rows, days)
+  const formatLabel = (usage: { readonly calls: number; readonly totalTokens: number }): string =>
+    `${usage.calls} calls, ${usage.totalTokens.toLocaleString()} tok`
+  const lines = [`Memory usage (last ${days} days, persisted usage.jsonl):`]
+  for (const day of daily) {
+    lines.push(`  ${day.day} | recall: ${formatLabel(day.recall)} | extract: ${formatLabel(day.extract)} | review: ${formatLabel(day.review)} | total: ${day.total.toLocaleString()} tok`)
+  }
+  return lines.join('\n')
+}
+
 /** 渲染 token 用量(`/lmemory usage`):静态上下文成本估算 + 动态 LLM 调用消耗。 */
 function renderUsage(runtime: Runtime, cwd: string | undefined): string {
   let nodeChars = 0
@@ -652,6 +676,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
               const counter = runtime.usage.get(label) ?? EMPTY_USAGE
               return { label, ...counter }
             }),
+            daily: aggregateByDay(readUsageRows(), 84),
           },
         }
       },
@@ -714,8 +739,15 @@ async function handleCommand(
         return { kind: 'success', text: renderStatus(teamStatus(runtime.state), runtime.config) }
       case 'stats':
         return { kind: 'success', text: renderStats(cwd, runtime.config) }
-      case 'usage':
+      case 'usage': {
+        if (command.days !== undefined) {
+          if (command.days < 1 || command.days > 90) {
+            return { kind: 'error', text: 'usage --days N requires 1 <= N <= 90.' }
+          }
+          return { kind: 'success', text: renderUsageDaily(readUsageRows(), command.days) }
+        }
         return { kind: 'success', text: renderUsage(runtime, cwd) }
+      }
       case 'ui': {
         const token = runtime.panelToken
         const port = ctx.get('webServer')?.port

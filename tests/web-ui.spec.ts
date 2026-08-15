@@ -247,6 +247,7 @@ describe('handlePanelRpc', () => {
             warmTeams: { nodes: 3, chars: 1200, tokens: 300 },
             summary: { chars: 400, tokens: 100 },
             counters: [{ label: 'recall', calls: 2, inputTokens: 100, outputTokens: 50, cacheReadTokens: 25 }],
+            daily: [{ day: '2026-08-14', recall: { calls: 1, inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, totalTokens: 17 }, extract: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0 }, review: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0 }, total: 17 }],
           },
         }
       },
@@ -255,10 +256,11 @@ describe('handlePanelRpc', () => {
     expect(result.ok).toBe(true)
     expect(received).toBe('/proj')
     if (result.ok) {
-      const value = result.value as { dashboard: { status: { teams: unknown[] }; stats: { total: number }; usage: { counters: unknown[] } } }
+      const value = result.value as { dashboard: { status: { teams: unknown[] }; stats: { total: number }; usage: { counters: unknown[]; daily: unknown[] } } }
       expect(value.dashboard.status.teams).toHaveLength(1)
       expect(value.dashboard.stats.total).toBe(2)
       expect(value.dashboard.usage.counters).toHaveLength(1)
+      expect(value.dashboard.usage.daily).toHaveLength(1)
     }
     // 缺省 cwd 透传 undefined(由注入实现做 process.cwd 回退)。
     const noCwd = await handlePanelRpc('dashboard-get', { acToken: token }, token, deps)

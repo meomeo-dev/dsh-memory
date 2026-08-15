@@ -33,14 +33,16 @@ dsh --profile demo
 - `/lmemory status` —— 查看 team 节点数 / 每节点状态
 - `/lmemory stats` —— 记忆统计:条目数(rules/lessons)、layer / domain 分布、文件大小、catalog 条目数(纯文件读,不发模型调用)
 - `/lmemory usage` —— token 用量:预热 team 与 system prompt 摘要的上下文成本估算 + 本进程 recall/extract/review 的 LLM 调用消耗(输入/输出/缓存读)
+- `/lmemory usage --days N` —— 按 `~/.dsh/lmemory/usage.jsonl` 持久化日志聚合近 N 天(1..90,重启不丢)
 - `/lmemory team start|stop|restart` —— 组装 / 释放 / 重新组装 team
 - `/lmemory query <text>` —— 人主动查询长期记忆
 - `/lmemory review [layer|domain]` —— 用 `deepseek-v4-pro` 质检记忆,发现矛盾/重复/过时/背离,报告注入主会话
 - `/lmemory catalog rebuild` —— 从全部 jsonl 重建 catalog
 - `/lmemory config get|set <key> [value]` —— 读写配置(见 `docs/design.md` §9 / `docs/auto-extraction.md` §7)
+- `/lmemory collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...]` —— 记忆根注册表管理与记忆包导出(备份/分享)
 - `/lmemory ui` —— 返回记忆 Web 面板链接(记忆页 + 设置页,带访问 token;仅 web 模式可用,见 `docs/web-panel.md`)
 
-Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链接(启动时也会经 harness logger 打印一行,是否可见取决于 web 模式的 logger 接线);面板含三个页面——记忆页(顶部筛选 + Timeline/Table 布局切换)、状态页(team 状态 + 统计指标块 + usage 图表)、设置页(13 个配置键)。
+Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链接(启动时也会经 harness logger 打印一行,是否可见取决于 web 模式的 logger 接线);面板含三个页面——记忆页(顶部筛选 + Timeline/Table 布局切换)、状态页(team 状态 + 统计指标块 + usage 图表,含近 14 天每日柱状图与近 12 周日历热力图)、设置页(13 个配置键)。
 
 ## 存储模型
 
