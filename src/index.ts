@@ -665,11 +665,16 @@ async function handleCommand(
         if (token === undefined || port === undefined) {
           return { kind: 'error', text: 'Memory panel is not available: this session has no webServer/connection (web mode only).' }
         }
-        const links = [
-          `[记忆面板](${panelUrl(port, 'memory', token)})`,
-          `[设置面板](${panelUrl(port, 'settings', token)})`,
-        ].join(' · ')
-        return { kind: 'success', text: `Memory panel: ${links}` }
+        // 命令卡片只在结果含换行时可展开/复制(GenericCommandCard 的 expandable 判定);
+        // 卡片是纯文本渲染,故用裸 URL 而非 markdown 链接语法。
+        return {
+          kind: 'success',
+          text: [
+            'Memory panel (展开后复制 URL):',
+            `  记忆面板: ${panelUrl(port, 'memory', token)}`,
+            `  设置面板: ${panelUrl(port, 'settings', token)}`,
+          ].join('\n'),
+        }
       }
       case 'team': {
         if (command.action === 'start') {
