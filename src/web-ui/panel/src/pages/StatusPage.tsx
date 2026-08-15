@@ -148,21 +148,6 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
           而不是白屏——升级后重启进程即恢复完整功能。 */}
       <section className="card">
         <span className="section-title">用量明细 (Usage, 近 14 天)</span>
-        {/* 日期胶囊:点击某天展开该天 24 小时二级表(与上方每日用量图共享选中态)。 */}
-        <div className="day-chips">
-          {usage.daily.slice(-14).map(day => (
-            <button
-              key={day.day}
-              type="button"
-              className={`day-chip${selectedDay === day.day ? ' selected' : ''}`}
-              title={`展开 ${day.day} 24 小时明细`}
-              onClick={() => setSelectedDay(selectedDay === day.day ? undefined : day.day)}
-            >
-              {day.day.slice(5)}
-            </button>
-          ))}
-        </div>
-        <p className="meta">点击日期胶囊或上方每日用量图的某天,展开该天 24 小时二级明细表(两处选中态联动)。</p>
         <div className="table-wrap">
           <table>
             <thead>
@@ -204,9 +189,29 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
             </tbody>
           </table>
         </div>
+        {/* 日期胶囊(位于按职责汇总表下方):点击某天展开该天 24 小时二级表
+            (与上方每日用量图共享选中态);选中态高亮,用户看到日期即知已点。 */}
+        <div className="day-chips">
+          {usage.daily.slice(-14).map(day => (
+            <button
+              key={day.day}
+              type="button"
+              className={`day-chip${selectedDay === day.day ? ' selected' : ''}`}
+              title={`展开 ${day.day} 24 小时明细`}
+              onClick={() => setSelectedDay(selectedDay === day.day ? undefined : day.day)}
+            >
+              {day.day.slice(5)}
+            </button>
+          ))}
+        </div>
+        <p className="meta">点击日期胶囊或上方每日用量图的某天,展开该天 24 小时二级明细表(两处选中态联动)。</p>
         {selectedDay !== undefined && usage.hourly !== undefined && (
           <div className="detail-wrap">
-            <p className="meta">按小时明细(与「近 14 天每日用量」选中天联动):{selectedDay} 00:00 – 24:00</p>
+            {/* 二级表控件头:高亮选中日期 + 收起按钮(明确的展开状态与关闭入口)。 */}
+            <div className="detail-head">
+              <span className="detail-title">▾ {selectedDay} 24 小时明细</span>
+              <button type="button" className="detail-close" onClick={() => setSelectedDay(undefined)}>收起 (Close)</button>
+            </div>
             <div className="table-wrap">
               <table className="detail-table">
                 <thead>

@@ -71,12 +71,42 @@
   border-top: 1px solid var(--dsw-alias-border-l1);
 }
 
-/* 明细表顶部的日期胶囊(点击展开该天 24 小时二级表;与每日图选中态共享)。 */
+/* 日期胶囊(位于按职责汇总表下方):点击展开该天 24 小时二级表;与每日图选中态共享。 */
 .day-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-top: 12px;
   margin-bottom: 8px;
+}
+
+/* 二级表控件头:高亮选中日期 + 收起按钮。 */
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.detail-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.detail-close {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.detail-close:hover {
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .day-chip {
