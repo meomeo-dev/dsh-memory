@@ -92,8 +92,14 @@
   font-weight: 500;
   color: var(--dsw-alias-label-secondary);
   padding: 1px 8px 1px 0 !important;
+  /* 宽随内容伸缩:128px 下限、176px 上限;超限裁剪 + ellipsis(悬停 title 全名),
+     文字永不绘制越界(.mono 12px 等宽下最长域 r/ContractConstants ≈ 145px;
+     上限兜住字体回退变宽)。 */
+  width: max-content;
   min-width: 128px;
-  max-width: 128px;
+  max-width: 176px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .activity-cell {

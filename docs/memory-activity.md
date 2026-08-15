@@ -22,7 +22,7 @@
 
 - **位置**:Team 状态卡之后、统计指标块(metric-grid)之上;单独一张全宽卡,标题「记忆活动 (近 24 小时,每 1 小时一格)」。
 - **X 轴**:24 列(固定格宽,容器横向滚动);顶部刻度行按小时标注(每桶一格、一桶一小时,本地 `HH` 时间);刻度跨距由 DTO `bucketMinutes` 派生(桶宽变化时自动跟随,非硬编码)。
-- **Y 轴**:42 行 = `rules` 段 21 域 + `lessons` 段 21 域(与 DISPLAY 枚举同序),标签列 `r/Domain` / `l/Domain`(sticky 左侧)。
+- **Y 轴**:42 行 = `rules` 段 21 域 + `lessons` 段 21 域(与 DISPLAY 枚举同序),标签列 `r/Domain` / `l/Domain`(sticky 左侧)。标签列宽随内容伸缩(128px 下限、176px 上限),超限裁剪 + ellipsis(悬停 title 显示全名)——文字永不绘制越界重叠格子区。
 - **格子**:3 字符规则(≤999 原值;≥1e3 → `99K`,≥1e6 → `99M`,≥1e9 → `99G`,≥1e12 → `99B`,≥1e15 → `99T`);底色按数量 5 档强度(复用热力图 `--heat-0..4`);悬停 title 显示窗口时间、组合与精确数量。
 - **实时**:状态页加 60s 自动轮询(与手动「刷新」并存;节点页 5s 轮询先例)。
 - 样式在 `status.css`;组件 `pages/ActivityTable.tsx`。
@@ -33,6 +33,7 @@
 - **计数正确**:条目按 `createdAt` 落桶,counts 键 `type/domain`;多根聚合(host 级)。
 - **3 字符规则**:0→`0`、999→`999`、1000→`99K`、1_234_567→`99M`、1e9→`99G`、1e12→`99B`、1e15→`99T`(xbrowser fixture 断言 + 面板函数镜像)。
 - **布局**:全宽卡、横向滚动、sticky 标签列;42 行 × 24 格恒渲染(空窗口全 0)。
+- **标签无重叠**:全部标签 `scrollWidth ≤ clientWidth + 1` 且 `overflow: hidden`——标签文字不侵入首个格子(xbrowser 锁定)。
 - **契约与视觉**:DTO 镜像;chromium / firefox / webkit 三引擎通过(零 console 错误)。
 
 ## 非目标
