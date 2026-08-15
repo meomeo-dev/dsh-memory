@@ -158,11 +158,12 @@ export function refreshRegistry(cwd?: string, now: number = Date.now()): Registr
     if (!existsSync(root)) continue
     next.push(upsertRoot(registry, root, 'user', now))
   }
-  // 项目根(cwd 提供时)。
+  // 项目根(cwd 提供时):无条件登记——自动提取是异步的,session-start 时刻
+  // 项目 lmemory 目录往往尚未创建;先按路径登记(0/0),目录出现后由后续
+  // 刷新(如提取写盘后的 refreshRegistry)更新计数。
   if (cwd !== undefined) {
     const projectRoot = findProjectRoot(cwd)
     for (const root of [join(projectRoot, '.dsh', 'lmemory'), join(projectRoot, '.agents', 'lmemory')]) {
-      if (!existsSync(root)) continue
       next.push(upsertRoot(registry, root, 'project', now))
     }
   }

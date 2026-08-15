@@ -366,6 +366,9 @@ async function runExtraction(ctx: Context, runtime: Runtime, session: Session): 
       ...(candidate.references === undefined ? {} : { references: candidate.references }),
     })
   }
+  // 提取写盘后刷新注册表计数:项目根可能在 session-start 时尚不存在
+  // (提取是异步的),此处目录已创建,补登并更新 entries/files。
+  refreshRegistry(cwd)
 }
 
 /** 读某会话的退火冷却计数器(缺省 0;agent.id 与 session.id 同值,故统一用会话 id 作 key)。 */

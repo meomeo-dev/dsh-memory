@@ -94,6 +94,24 @@ describe('refreshRegistry', () => {
     expect(proj.firstSeenAt).toBe(NOW)
   })
 
+  it('registers project roots even before the dir exists (async extraction ordering)', () => {
+    // session-start 时刻项目 lmemory 尚未创建(提取是异步的):先按路径登记 0/0。
+    const registry = refreshRegistry(project, NOW)
+    const proj = registry.roots.find(root => root.root === join(project, '.dsh', 'lmemory'))!
+    expect(proj.kind).toBe('project')
+    expect(proj.entries).toBe(0)
+    expect(proj.files).toBe(0)
+
+    // 提取写盘后目录出现,再次刷新更新计数。
+    seedJsonl(join(project, '.dsh', 'lmemory'), 3)
+    const refreshed = refreshRegistry(project, NOW + 1)
+    const updated = refreshed.roots.find(root => root.root === join(project, '.dsh', 'lmemory'))!
+    expect(updated.entries).toBe(3)
+    expect(updated.files).toBe(1)
+    expect(updated.firstSeenAt).toBe(NOW) // 首次登记时间保持。
+    expect(updated.lastSeenAt).toBe(NOW + 1)
+  })
+
   it('keeps historical roots with last-known counts when they disappear', () => {
     seedJsonl(join(project, '.dsh', 'lmemory'), 4)
     refreshRegistry(project, NOW)
