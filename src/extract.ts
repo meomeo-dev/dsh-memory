@@ -172,6 +172,23 @@ export function buildTranscript(messages: readonly TranscriptMessage[]): string 
 }
 
 /**
+ * 空 transcript 守卫的最小总字符数(含 role 前缀)。低于此值的 transcript
+ * 视为「trivially empty」,不发 LLM 调用(docs/auto-extraction.md §11 A)。
+ * 实测空转抽取平均输入 ~24 tokens(≈ 40 字符以下),40 是哨兵值而非调优旋钮
+ * (调频用 `extractInterval`),故为常量而非配置项。
+ */
+export const MIN_TRANSCRIPT_CHARS = 40
+
+/**
+ * 判断 transcript 是否低于最小内容门槛(空/近空,无抽取价值)。
+ * @param transcript - {@link buildTranscript} 的输出。
+ * @returns 低于 {@link MIN_TRANSCRIPT_CHARS} 时为真。
+ */
+export function isTranscriptTooShort(transcript: string): boolean {
+  return transcript.length < MIN_TRANSCRIPT_CHARS
+}
+
+/**
  * 退火门槛:turn 停止时先计时,满冷却期(`interval`)放行并归零。
  * 冷却期是**抑制器**——事件是唯一触发源,计数器决定放行与否(docs/auto-extraction.md §3 形态 3)。
  * @param turnsSince - 距上次抽取的 turn 数。
@@ -192,11 +209,6 @@ export function annealTurnStopping(turnsSince: number, interval: number): Anneal
  */
 export function annealError(turnsSince: number, interval: number): AnnealDecision {
   if (turnsSince < interval) return { released: false, turnsSince }
-  return { released: true, turnsSince: 0 }
-}
-
-/** 退火门槛:会话开始直接放行并归零(冷却计数器随新会话自然归零)。 */
-export function annealSessionStart(): AnnealDecision {
   return { released: true, turnsSince: 0 }
 }
 

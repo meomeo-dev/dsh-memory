@@ -64,13 +64,13 @@ import {
 import type { ExtractMode, MemoryConfig, RuntimeState, TeamStatus } from './memory-runtime.js'
 import {
   annealError,
-  annealSessionStart,
   annealTurnStopping,
   buildTranscript,
   containsSignalWord,
   deriveLayer,
   extractBoth,
   filterNovel,
+  isTranscriptTooShort,
   parseSignalWords,
 } from './extract.js'
 import type { ExtractFn, TranscriptMessage } from './extract.js'
@@ -147,8 +147,8 @@ type UsageLabel = NodeStatusKey
 interface Runtime {
   readonly state: RuntimeState
   config: MemoryConfig
-  /** 会话 id → 距上次抽取的 turn 数(形态 3 退火冷却,按会话独立)。 */
-  readonly annealing: Map<string, number>
+  /** 距上次抽取的触发事件数(退火冷却,进程级单计数器;全部触发路径共享预算,docs/auto-extraction.md §11 B)。 */
+  annealing: number
   /** 职责分类 → LLM 调用消耗累计(供 `/lmemory usage`)。 */
   readonly usage: Map<UsageLabel, UsageCounter>
   /** 3 类节点的运行状态机(空闲/运行中/最近一次;见 runtime-status.js)。 */
@@ -436,6 +436,8 @@ async function runExtraction(ctx: Context, runtime: Runtime, session: Session): 
   const cwd = session.header.cwd
   if (cwd === undefined) return
   const transcript = buildTranscript(toTranscript(session.deriveMessages()))
+  // 空/近空 transcript 守卫:不发 LLM 调用(docs/auto-extraction.md §11 A)。
+  if (isTranscriptTooShort(transcript)) return
   const rulesFn: ExtractFn = text => callFlash(ctx, runtime, runtime.config.extractRulesPrompt, text, 'extract')
   const lessonsFn: ExtractFn = text => callFlash(ctx, runtime, runtime.config.extractLessonsPrompt, text, 'extract')
   const result = await extractBoth(transcript, rulesFn, lessonsFn, (type, error) => warnNode(ctx, `extract ${type}`, error))
@@ -460,9 +462,9 @@ async function runExtraction(ctx: Context, runtime: Runtime, session: Session): 
   refreshRegistry(cwd)
 }
 
-/** 读某会话的退火冷却计数器(缺省 0;agent.id 与 session.id 同值,故统一用会话 id 作 key)。 */
-function turnsSince(runtime: Runtime, sessionId: string): number {
-  return runtime.annealing.get(sessionId) ?? 0
+/** 读进程级退火冷却计数器(缺省 0;全部会话/agent 共享,docs/auto-extraction.md §11 B)。 */
+function turnsSince(runtime: Runtime): number {
+  return runtime.annealing
 }
 
 /** 触发一次抽取(后台 fire-and-forget,吞掉错误避免未处理拒绝)。 */
@@ -495,37 +497,40 @@ function registerAutoExtraction(ctx: Context, runtime: Runtime): void {
     scheduleExtraction(ctx, runtime, session)
   })
 
-  // 形态 2 计数器:观测 turn/end,纯 turn 计数到 extractInterval 触发。
+  // 形态 2 计数器:观测 turn/end,纯 turn 计数到 extractInterval 触发(进程级共享计数器)。
   ctx.on('session/event', (session, event) => {
     if (!extractEnabled(runtime.config, 'counter')) return
     if (event.type !== 'turn/end') return
-    const decision = annealTurnStopping(turnsSince(runtime, session.id), runtime.config.extractInterval)
-    runtime.annealing.set(session.id, decision.turnsSince)
+    const decision = annealTurnStopping(turnsSince(runtime), runtime.config.extractInterval)
+    runtime.annealing = decision.turnsSince
     if (decision.released) scheduleExtraction(ctx, runtime, session)
   })
 
   // 形态 3 事件 + 计数器:agent 事件(语义触发)+ 计数器退火抑制高频。
-  // 高频检查点:每 turn 触发一次,退火降到每 N turn 最多一次。
+  // 高频检查点:每 turn 触发一次,退火降到每 N turn 最多一次(进程级共享计数器)。
   ctx.on('agent/turn-stopping', ({ agent }) => {
     if (!extractEnabled(runtime.config, 'event-counter')) return
-    const decision = annealTurnStopping(turnsSince(runtime, agent.id), runtime.config.extractInterval)
-    runtime.annealing.set(agent.id, decision.turnsSince)
+    const decision = annealTurnStopping(turnsSince(runtime), runtime.config.extractInterval)
+    runtime.annealing = decision.turnsSince
     if (decision.released) scheduleExtraction(ctx, runtime, agent.session)
   })
 
-  // 强语义事件:出错即抽,退火同样防连续 error 高频触发。
+  // 强语义事件:出错即抽,退火同样防连续 error 高频触发(进程级共享计数器)。
   ctx.on('agent/error', ({ agent }) => {
     if (!extractEnabled(runtime.config, 'event-counter')) return
-    const decision = annealError(turnsSince(runtime, agent.id), runtime.config.extractInterval)
-    runtime.annealing.set(agent.id, decision.turnsSince)
+    const decision = annealError(turnsSince(runtime), runtime.config.extractInterval)
+    runtime.annealing = decision.turnsSince
     if (decision.released) scheduleExtraction(ctx, runtime, agent.session)
   })
 
-  // 会话开始:新会话直接抽 + 冷却归零。
-  ctx.on('agent/session-start', ({ agent }) => {
+  // 会话开始:仅带历史的重开(resume / compact)回顾尾部并纳入同一退火冷却;
+  // fresh 会话(startup / clear)此刻 deriveMessages() 为空,直接跳过
+  // (docs/auto-extraction.md §11 C)。未知 source 一律跳过(少抽不误抽)。
+  ctx.on('agent/session-start', ({ agent, source }) => {
     if (!extractEnabled(runtime.config, 'event-counter')) return
-    const decision = annealSessionStart()
-    runtime.annealing.set(agent.id, decision.turnsSince)
+    if (source !== 'resume' && source !== 'compact') return
+    const decision = annealTurnStopping(turnsSince(runtime), runtime.config.extractInterval)
+    runtime.annealing = decision.turnsSince
     if (decision.released) scheduleExtraction(ctx, runtime, agent.session)
   })
 }
@@ -1344,7 +1349,7 @@ function registerTools(ctx: Context, runtime: Runtime): void {
  * @param ctx - Cordis 上下文。
  */
 export function apply(ctx: Context): void {
-  const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG }, annealing: new Map(), usage: new Map(), nodes: createNodeStates(), publish: () => {} }
+  const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG }, annealing: 0, usage: new Map(), nodes: createNodeStates(), publish: () => {} }
 
   // 跨进程运行时状态(docs/node-status.md):启动即发布 → 节点状态变化即发布 →
   // 15s 心跳(顺带刷新 team 装载快照)→ fiber 销毁时清理器删除自己的文件。

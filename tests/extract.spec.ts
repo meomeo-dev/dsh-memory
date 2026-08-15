@@ -4,13 +4,14 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   annealError,
-  annealSessionStart,
   annealTurnStopping,
   buildTranscript,
   containsSignalWord,
   deriveLayer,
   extractBoth,
   filterNovel,
+  isTranscriptTooShort,
+  MIN_TRANSCRIPT_CHARS,
   parseExtraction,
   parseSignalWords,
 } from '../src/extract.js'
@@ -178,8 +179,31 @@ describe('annealing gate', () => {
     expect(annealError(5, 5).turnsSince).toBe(0)
   })
 
-  it('session-start always releases and resets the counter', () => {
-    expect(annealSessionStart()).toEqual({ released: true, turnsSince: 0 })
+  it('session-start no longer bypasses the cooldown: it shares annealTurnStopping', () => {
+    // docs/auto-extraction.md §11 B:session-start 与其余事件同走冷却,
+    // 冷启动计数器(0)时被抑制,攒满 interval 才放行——不再无条件抽。
+    expect(annealTurnStopping(0, 5).released).toBe(false)
+    const decision = annealTurnStopping(4, 5)
+    expect(decision.released).toBe(true)
+    expect(decision.turnsSince).toBe(0)
+  })
+})
+
+describe('transcript guard', () => {
+  it('blocks transcripts below MIN_TRANSCRIPT_CHARS and passes at the threshold', () => {
+    expect(isTranscriptTooShort('')).toBe(true)
+    expect(isTranscriptTooShort('user: 记住')).toBe(true)
+    expect(isTranscriptTooShort('x'.repeat(MIN_TRANSCRIPT_CHARS - 1))).toBe(true)
+    expect(isTranscriptTooShort('x'.repeat(MIN_TRANSCRIPT_CHARS))).toBe(false)
+  })
+
+  it('a normal short exchange passes the guard', () => {
+    const transcript = buildTranscript([
+      { role: 'user', text: '记住,以后提交前先跑测试。' },
+      { role: 'assistant', text: '好的,已记下这条偏好。' },
+    ])
+    expect(transcript.length).toBeGreaterThanOrEqual(MIN_TRANSCRIPT_CHARS)
+    expect(isTranscriptTooShort(transcript)).toBe(false)
   })
 })
 

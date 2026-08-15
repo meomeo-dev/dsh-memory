@@ -78,12 +78,12 @@ ctx.on('session/event', (session, event) => {
 
 ### 形态 2:计数器(counter)
 
-**触发**:监听 `turn/end`,累计轮次,每 N 轮抽一次。
+**触发**:监听 `turn/end`,累计轮次,每 N 轮抽一次。计数器与形态 3 同为**进程级单计数器**(§11 B):同进程内任一会话的 `turn/end` 都推进同一预算。
 
 **落点**:
 
 ```ts
-let turnsSinceLastExtract = 0
+let turnsSinceLastExtract = 0        // 进程级共享(与形态 3 同一计数器)
 ctx.on('session/event', (session, event) => {
   if (event.type !== 'turn/end') return
   turnsSinceLastExtract += 1
@@ -110,15 +110,15 @@ ctx.on('session/event', (session, event) => {
 | agent 事件 | mode | 触发语义 |
 |---|---|---|
 | `agent/error` | emit | 出错 = 强信号「记 lesson」 |
-| `agent/session-start` | emit | 会话开始 = 回顾上次会话未沉淀的尾部 |
+| `agent/session-start` | emit | 会话开始(仅带历史的重开,见 §11 C)= 回顾上次会话未沉淀的尾部 |
 | `agent/turn-stopping` | serial | turn 关闭前 = 常规检查点(每 turn 一次,高频) |
 
-**「计数器」= 退火/冷却(annealing)**:事件本身可能高频触发——`agent/turn-stopping` 每 turn 一次、连续出错会反复触发 `agent/error`。计数器维护「距上次抽取的 turn 数」作为**冷却期**,冷却期内抑制一切事件抽取,把实际频率降到「每 N turn 最多一次」。它**不是**兜底(不主动触发抽取),而是**抑制器**(事件是唯一触发源,计数器决定放行与否)。
+**「计数器」= 退火/冷却(annealing)**:事件本身可能高频触发——`agent/turn-stopping` 每 turn 一次、连续出错会反复触发 `agent/error`。计数器维护「距上次抽取的 turn 数」作为**冷却期**,冷却期内抑制一切事件抽取,把实际频率降到「每 N turn 最多一次」。计数器是**进程级单计数器**(同一进程内全部会话/agent 共享一个预算,§11 B)。它**不是**兜底(不主动触发抽取),而是**抑制器**(事件是唯一触发源,计数器决定放行与否)。
 
 **落点**:
 
 ```ts
-let turnsSinceLastExtract = 0        // 距上次抽取的 turn 数(冷却计时)
+let turnsSinceLastExtract = 0        // 距上次抽取的 turn 数(冷却计时,进程级共享)
 
 // 退火门槛:冷却期内抑制,防止事件触发太频繁
 function cool(session: Session): void {
@@ -136,19 +136,21 @@ ctx.on('agent/turn-stopping', ({ agent }) => {
 // 强语义事件:出错即抽,退火同样防连续 error 高频触发
 ctx.on('agent/error', ({ agent }) => cool(agent.session))
 
-// 会话开始:新会话冷启动,直接抽(冷却计数器随新会话自然归零)
-ctx.on('agent/session-start', ({ agent }) => {
-  void extract(agent.session)
-  turnsSinceLastExtract = 0
+// 会话开始:仅带历史的重开(resume / compact)回顾尾部;fresh 会话无内容可抽,
+// 跳过(§11 C);重开与其余事件同走冷却,不再无条件放行(§11 B)
+ctx.on('agent/session-start', ({ agent, source }) => {
+  if (source !== 'resume' && source !== 'compact') return
+  turnsSinceLastExtract += 1                          // 先计时,再同款退火
+  cool(agent.session)
 })
 ```
 
 `extract(agent.session)` 拿 session 调 `deriveMessages()`(见 §4)得到主会话此刻上下文。
 
-**代价**:事件触发是高频的,但退火冷却把真实抽取次数压到「每 N turn 最多一次」;强语义事件(出错、会话开始)在冷却期外即时响应。成本可预测且不随事件频率失控。
+**代价**:事件触发是高频的,但退火冷却把真实抽取次数压到「每 N 个触发事件最多一次」(进程级);强语义事件(出错、带历史的重开)在冷却期外即时响应。成本可预测且不随事件频率失控。
 
-**优点**:事件语义(出错→lesson、会话开始→回顾)精准;退火保证事件再频繁也不超频。
-**缺点**:逻辑较复杂,要维护一个冷却计数器 + 三个事件监听。
+**优点**:事件语义(出错→lesson、重开→回顾)精准;退火保证事件再频繁也不超频。
+**缺点**:逻辑较复杂,要维护一个冷却计数器 + 三个事件监听;进程级预算下并行会话彼此分摊抽取频率(§11 B 的取舍)。
 
 ## 4. 抽取窗口:与主会话上下文保持一致
 
@@ -347,4 +349,30 @@ dsh 的 session 暴露 `deriveMessages(): Message[]`(`packages/core/session/src/
 
 1. **lessons「同主题合并」降级为「按 entry 精确去重」**。§5.2 / §5.5 描述的「与已有 lessons 判是否同主题合并(≤300 字)→ 合并或新增(store.update)」未实现:lessons 候选先按 entry 文本与已有 lessons 精确比对去重(`filterNovel`),去重后的候选只走 `store.append` 新增,**不合并、不调 `store.update`**。同一主题的近似重复可能以不同 entry 文本并存;是否补同主题合并,留待真实数据验证后再定。
 
-2. **`agent/session-start` 抽取在 fresh 会话基本是空操作**。§3 形态 3 给 session-start 的语义是「回顾上次会话未沉淀的尾部」,但 §4 钉死抽取输入 = `deriveMessages()`(主会话此刻上下文)——fresh 会话在 `agent/session-start` 触发时 `deriveMessages()` 为空,抽取只会以空 transcript 发出两次 v4-flash 调用并返回空,不写任何记忆;「回顾尾部」仅在 resume / compact 回放历史、`deriveMessages()` 非空时才有实际内容。实现保留该监听(冷却计数器随新会话归零,resume 场景受益),但**不承诺「回顾上次会话尾部」语义**。
+2. **`agent/session-start` 抽取在 fresh 会话基本是空操作**。§4 钉死抽取输入 = `deriveMessages()`(主会话此刻上下文)——fresh 会话在 `agent/session-start` 触发时 `deriveMessages()` 为空,抽取只会以空 transcript 发出两次 v4-flash 调用并返回空,不写任何记忆;「回顾尾部」仅在 resume / compact 回放历史、`deriveMessages()` 非空时才有实际内容。§11 已按此事实修订该监听:仅 `resume` / `compact` 触发(C),并纳入进程级退火冷却(B)。
+
+## 11. 冷却与空转根治(2026-08-15 实测驱动修订)
+
+**问题(用户故事)**:用户一天只开几次对话、每次几轮,但节点页显示 extract 被调用 173 次——按「每 5 turn 最多一次」应约等于 173×5 turn 的活跃度,远超实际感受。实测(2026-08-15,单进程 web 会话窗口)定位到三个叠加的放大器:
+
+| 实测项 | 值 |
+|---|---|
+| usage.jsonl extract 行数 | 173 行 ≈ 86 次真实触发(每次触发 rules + lessons 两个节点各记一行) |
+| 同窗口会话事件(session-start + turn/end + error) | 89 个 |
+| extract 平均输入(未缓存部分) | ~24 tokens(≈ 40 字符以下,近空 transcript) |
+| `session/end-seed`(打开旧对话)→ 抽取触发 | 100% 对应、延迟 7–30s |
+| 全天实际沉淀 | 1 条 rules,其余 172 次调用空转 |
+
+根因:① `agent/session-start` **无条件放行**——web 模式每打开/新建一次对话都重建 agent、触发 session-start 并立即抽取,而此刻 `deriveMessages()` 为空或近空;② 退火计数器**按会话独立**——每个新会话计数器从 0 开始,session-start 又把它归零,计数器永远攒不到 `extractInterval`,冷却形同虚设;③ 近空 transcript 也照发 LLM 调用。
+
+**修订(三项决策,根治)**:
+
+**A. 空 transcript 守卫(全触发路径兜底)**。`runExtraction` 构建 transcript 后先过最小内容守卫:`MIN_TRANSCRIPT_CHARS = 40`(总字符数,含 role 前缀)。低于阈值直接返回,**不发任何 LLM 调用**。阈值是「trivially empty」的哨兵值,不是用户调优旋钮(调频用 `extractInterval`),故为常量而非配置项。代价:极短的真实对话(单条 < 40 字符)在信号词形态下也会被跳过——该场景建议直接走 `remember` 工具(主动记忆路径)。
+
+**B. 退火计数器改为进程级共享**。原实现「会话 id → 计数」的 Map 改为**进程级单计数器**,全部触发路径(形态 2 `turn/end`、形态 3 `turn-stopping` / `error` / `session-start`)推进同一预算:同一进程内每 N 个触发事件最多一次抽取。这也修正了实现与 §3 落点(本来就是模块级 `turnsSinceLastExtract`)的偏离。取舍:并行会话彼此分摊抽取频率(每个会话实际抽取率低于 1/N),换取「会话重开风暴」被硬性压住;单会话场景与修订前完全等价。`session-start` 不再无条件放行,与其余事件同走 `annealTurnStopping`。
+
+**C. session-start 仅对带历史会话触发**。`agent/session-start` 的 payload 带 `source: 'startup' | 'resume' | 'clear' | 'compact'`(harness `SessionStartSource`)。监听按 source 过滤:**仅 `resume` / `compact`(带历史的会话重开)调度抽取**——「回顾上次会话未沉淀的尾部」只在此时有实际内容;`startup`(新建对话)与 `clear` 此刻 `deriveMessages()` 为空,直接跳过。未知 source 一律跳过(少抽不误抽)。「回顾尾部」不再即时发生:重开后先走 B 的冷却,尾部内容由该会话后续 `turn-stopping` 触发承接(此时 transcript 已含恢复的历史)。
+
+**修订后的行为契约**:进程内任一时刻,「实际发出抽取调用」的充分条件是——某触发事件(带历史重开 / turn 停止 / 出错 / turn 计数)发生 AND 进程级计数器 ≥ `extractInterval`(或事件为错误路径的冷却期外) AND transcript ≥ 40 字符。三重抑制叠加后,抽取频率上限 = 每 N 个触发事件一次 × 内容守卫,与「一天几次对话」的用户体感一致。
+
+**非目标**:不引入基于墙钟时间的冷却(语义仍是 turn 事件计数);守卫阈值不做配置项;不改变形态 1(信号词)的无退火设计(其成本本就靠「无记忆返回空」约束)。
