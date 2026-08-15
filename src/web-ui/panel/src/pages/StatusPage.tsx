@@ -191,6 +191,7 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
         </div>
         {/* 日期胶囊(位于按职责汇总表下方):点击某天展开该天 24 小时二级表
             (与上方每日用量图共享选中态);选中态高亮,用户看到日期即知已点。 */}
+        <span className="day-chips-title">查看某日明细 (View a day)</span>
         <div className="day-chips">
           {usage.daily.slice(-14).map(day => (
             <button

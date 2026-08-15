@@ -76,8 +76,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: 8px;
   margin-bottom: 8px;
+}
+
+/* 日期切换组件的小标题(「查看某日明细」)。 */
+.day-chips-title {
+  display: block;
+  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
 }
 
 /* 二级表控件头:高亮选中日期 + 收起按钮。 */
