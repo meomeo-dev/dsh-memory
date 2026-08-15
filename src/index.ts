@@ -36,9 +36,9 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
 import { formatCreatedAt, renderSummary } from './render.js'
-import { discoverEntries, migrateLegacyMemoryDirs, resolveRecalled } from './memory-file.js'
+import { builtinMemoryDir, discoverEntries, migrateLegacyMemoryDirs, resolveRecalled } from './memory-file.js'
 import type { RecalledEntry } from './memory-file.js'
-import { append, find, rebuild, remove, removeByEntry, update } from './store.js'
+import { append, find, findIn, rebuild, remove, removeByEntry, update } from './store.js'
 import { recall as recallTeam } from './team.js'
 import type { NodeRecallFn, RerankFn } from './team.js'
 import {
@@ -73,7 +73,7 @@ import {
   parseSignalWords,
 } from './extract.js'
 import type { ExtractFn, TranscriptMessage } from './extract.js'
-import { computeStats, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.js'
+import { computeStats, computeStatsIn, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.js'
 import type { UsageCounter } from './stats.js'
 import { aggregateByDay, appendUsageRow, readUsageRows } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
@@ -271,6 +271,20 @@ async function callFlash(
 /** 节点失败告警(per-node 容错的可观测性;绑定 ctx.logger.warn,不中断流程)。 */
 function warnNode(ctx: Context, label: string, error: unknown): void {
   ctx.logger.warn(`dsh-memory: ${label} failed: ${error instanceof Error ? error.message : String(error)}`)
+}
+
+/**
+ * host 级记忆视图的目录列表:内置层 + 注册表中仍存在的全部根。
+ * 面板(记忆页 / 状态页统计)与目录页从此共用一个数据源(注册表);
+ * 会话级可见记忆(模型工具 / /lmemory 命令)仍走 cwd 视图。
+ * @returns 记忆目录绝对路径列表(去重,不存在的根跳过)。
+ */
+function hostMemoryDirs(): string[] {
+  const dirs = [builtinMemoryDir()]
+  for (const entry of loadRegistry().roots) {
+    if (existsSync(entry.root)) dirs.push(entry.root)
+  }
+  return [...new Set(dirs)]
 }
 
 /**
@@ -698,11 +712,10 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
   // apply 时该 fiber 未必已 ACTIVE,故用声明式注入而非 ctx.get(与 api-proxy 同款)。
   ctx.inject(['connection'], (cctx) => {
     const deps: PanelDeps = {
-      entries(cwd, filters) {
-        // 浏览器没有项目上下文:缺省落在 dsh web 进程的启动目录,面板能看到
-        // 「启动所在项目」的项目层记忆 + 内置/用户层;cwd 载荷仍可显式指定。
-        const root = cwd ?? process.cwd()
-        const rows = find(root, {
+      entries(filters) {
+        // host 级视图:内置层 + 注册表全部仍存在的根(与目录页同一数据源;
+        // docs/storage-and-collections.md §Q2)。会话级可见记忆仍走模型工具与 /lmemory。
+        const rows = findIn(hostMemoryDirs(), {
           ...(filters.type !== undefined ? { type: filters.type } : {}),
           ...(filters.domain !== undefined ? { domain: filters.domain } : {}),
           ...(filters.layer !== undefined ? { layer: filters.layer } : {}),
@@ -710,16 +723,16 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
         rows.sort((a, b) => b.entry.createdAt - a.entry.createdAt)
         return rows.map(({ entry, file }) => ({ entry, file }))
       },
-      dashboard(cwd) {
-        const root = cwd ?? process.cwd()
-        const stats = computeStats(root)
+      dashboard() {
+        const stats = computeStatsIn(hostMemoryDirs())
         let nodeChars = 0
         let nodeCount = 0
         for (const team of runtime.state.teams.values()) {
           nodeCount += team.nodes.length
           for (const node of team.nodes) nodeChars += node.text.length
         }
-        const summaryChars = renderSummary(discoverEntries(root)).length
+        // 摘要体积是本进程的会话产物(按进程启动目录),不随 host 统计走注册表。
+        const summaryChars = renderSummary(discoverEntries(process.cwd())).length
         const labels: readonly UsageLabel[] = ['recall', 'extract', 'review']
         return {
           status: {

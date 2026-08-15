@@ -6,7 +6,7 @@ import { checkMarkdown } from '../src/check.js'
 import { memoryWriteRoots } from '../src/memory-file.js'
 import { isMemoryId } from '../src/schema.js'
 import type { MemoryEntryInput, MemoryId } from '../src/schema.js'
-import { append, find, rebuild, remove, removeByEntry, update } from '../src/store.js'
+import { append, find, findIn, rebuild, remove, removeByEntry, update } from '../src/store.js'
 
 function candidate(overrides: Partial<MemoryEntryInput> = {}): MemoryEntryInput {
   return {
@@ -191,6 +191,30 @@ describe('find', () => {
     const byLayer = find(project, { layer: 'project' })
     expect(byLayer).toHaveLength(1)
     expect(byLayer[0]!.entry.scope).toBe('样本库')
+  })
+})
+
+describe('findIn', () => {
+  it('reads explicit dirs and returns absolute file paths without basename merging', () => {
+    const dirA = mkdtempSync(join(tmpdir(), 'dsh-memory-findin-a-'))
+    const dirB = mkdtempSync(join(tmpdir(), 'dsh-memory-findin-b-'))
+    const row = (seq: number, entry: string, domain = 'Style') => JSON.stringify({ id: `m-000000000${seq}`, schemaVersion: 1, type: 'rules', domain, scope: '全项目', layer: 'project', entry, entryPoint: '-', references: '-' })
+    writeFileSync(join(dirA, '2026-08-14.rules.remember.jsonl'), `${row(1, 'A 条目')}\n${row(2, 'A 第二条', 'DurablePrefs')}\n`)
+    writeFileSync(join(dirB, '2026-08-14.rules.remember.jsonl'), `${row(3, 'B 条目')}\n`)
+
+    const all = findIn([dirA, dirB], {})
+    expect(all).toHaveLength(3)
+    expect(all.map(found => found.file)).toEqual([
+      join(dirA, '2026-08-14.rules.remember.jsonl'),
+      join(dirA, '2026-08-14.rules.remember.jsonl'),
+      join(dirB, '2026-08-14.rules.remember.jsonl'),
+    ])
+    // 过滤条件照常生效;不存在的目录跳过,重复路径去重。
+    expect(findIn([dirA, dirB], { domain: 'DurablePrefs' })).toHaveLength(1)
+    expect(findIn([dirA, dirA, join(tmpdir(), 'nope')], {})).toHaveLength(2)
+
+    rmSync(dirA, { recursive: true, force: true })
+    rmSync(dirB, { recursive: true, force: true })
   })
 })
 

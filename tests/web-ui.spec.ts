@@ -196,29 +196,29 @@ describe('handlePanelRpc', () => {
     if (!unknown.ok) expect(unknown.error.code).toBe('bad-request')
   })
 
-  it('serves entries with filters passed through to the deps', async () => {
-    let received: { cwd?: string; filters?: unknown } = {}
+  it('serves entries with filters passed through to the deps (host view, no cwd)', async () => {
+    let received: unknown
     const deps = makeDeps({
-      entries: (cwd, filters) => {
-        received = { cwd, filters }
-        return [{ entry: entry(), file: '2026-08-13.rules.remember.jsonl' }]
+      entries: (filters) => {
+        received = filters
+        return [{ entry: entry(), file: '/root/lmemory/2026-08-13.rules.remember.jsonl' }]
       },
     })
     const result = await handlePanelRpc('entries', {
       acToken: token,
-      cwd: '/proj',
       filters: { type: 'rules', domain: 'DurablePrefs', layer: 'user', query: '提交' },
     }, token, deps)
     expect(result.ok).toBe(true)
-    expect(received).toEqual({
-      cwd: '/proj',
-      filters: { type: 'rules', domain: 'DurablePrefs', layer: 'user', query: '提交' },
-    })
+    expect(received).toEqual({ type: 'rules', domain: 'DurablePrefs', layer: 'user', query: '提交' })
     if (result.ok) {
       const value = result.value as { entries: Array<{ entry: MemoryEntry; file: string }> }
-      expect(value.entries[0]!.file).toBe('2026-08-13.rules.remember.jsonl')
+      expect(value.entries[0]!.file).toBe('/root/lmemory/2026-08-13.rules.remember.jsonl')
       expect(value.entries[0]!.entry.createdAt).toBe(1750000000000)
     }
+    // 空 filters 载荷 → 空对象透传(host 视图由注入实现决定数据源)。
+    const bare = await handlePanelRpc('entries', { acToken: token }, token, deps)
+    expect(bare.ok).toBe(true)
+    expect(received).toEqual({})
   })
 
   it('reads and writes config through the deps', async () => {
@@ -239,10 +239,10 @@ describe('handlePanelRpc', () => {
   })
 
   it('serves the dashboard view model through the deps', async () => {
-    let received: string | undefined
+    let called = false
     const deps = makeDeps({
-      dashboard: (cwd) => {
-        received = cwd
+      dashboard: () => {
+        called = true
         return {
           status: { maxNodeKb: 600, teams: [{ root: '/proj', nodes: 3 }] },
           stats: {
@@ -260,9 +260,9 @@ describe('handlePanelRpc', () => {
         }
       },
     })
-    const result = await handlePanelRpc('dashboard-get', { acToken: token, cwd: '/proj' }, token, deps)
+    const result = await handlePanelRpc('dashboard-get', { acToken: token }, token, deps)
     expect(result.ok).toBe(true)
-    expect(received).toBe('/proj')
+    expect(called).toBe(true)
     if (result.ok) {
       const value = result.value as { dashboard: { status: { teams: unknown[] }; stats: { total: number }; usage: { counters: unknown[]; daily: unknown[] } } }
       expect(value.dashboard.status.teams).toHaveLength(1)
@@ -270,10 +270,6 @@ describe('handlePanelRpc', () => {
       expect(value.dashboard.usage.counters).toHaveLength(1)
       expect(value.dashboard.usage.daily).toHaveLength(1)
     }
-    // 缺省 cwd 透传 undefined(由注入实现做 process.cwd 回退)。
-    const noCwd = await handlePanelRpc('dashboard-get', { acToken: token }, token, deps)
-    expect(noCwd.ok).toBe(true)
-    expect(received).toBeUndefined()
   })
 
   it('folds dependency failures into an internal error', async () => {

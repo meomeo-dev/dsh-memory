@@ -353,12 +353,24 @@ export function removeByEntry(cwd: string, entryText: string, type?: MemoryType)
  * @returns 命中的记忆(按目录与文件排序)。
  */
 export function find(cwd: string | undefined, query: FindQuery): FoundEntry[] {
+  return findIn(visibleMemoryDirs(cwd), query)
+}
+
+/**
+ * 在显式给出的记忆目录列表上过滤查找记忆(不 import cordis;供会话视图与
+ * host 级注册表视图共用)。与 {@link find} 的差别:不做 basename 合并,且
+ * `file` 为**绝对路径**——不同根是同名文件的独立数据,短名无法区分来源。
+ * @param dirs - 记忆目录绝对路径列表(去重后遍历;不存在的目录跳过)。
+ * @param query - 过滤条件(空条件返回全部)。
+ * @returns 命中的记忆(按目录与文件排序,file 为绝对路径)。
+ */
+export function findIn(dirs: readonly string[], query: FindQuery): FoundEntry[] {
   const results: FoundEntry[] = []
-  for (const dir of visibleMemoryDirs(cwd)) {
+  for (const dir of new Set(dirs)) {
     if (!existsSync(dir)) continue
     for (const file of loadDirMigrating(dir)) {
       for (const entry of file.entries) {
-        if (matches(entry, query)) results.push({ entry, file: basename(file.jsonlPath) })
+        if (matches(entry, query)) results.push({ entry, file: file.jsonlPath })
       }
     }
   }

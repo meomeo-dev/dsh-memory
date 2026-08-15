@@ -420,10 +420,10 @@ export interface RootsView {
 
 /** 面板 RPC 通道的注入依赖(纯接口,由 index.ts 闭包提供)。 */
 export interface PanelDeps {
-  /** 按过滤条件列出可见记忆(带所在文件);实现须按 createdAt 降序返回。 */
-  entries(cwd: string | undefined, filters: PanelFilters): PanelEntryRow[]
-  /** 状态页视图模型(status / stats / usage 一次取齐)。 */
-  dashboard(cwd: string | undefined): DashboardDto
+  /** 按过滤条件列出 host 级记忆(注册表视图,带所在文件绝对路径);实现须按 createdAt 降序返回。 */
+  entries(filters: PanelFilters): PanelEntryRow[]
+  /** 状态页视图模型(status / stats / usage 一次取齐;stats 为 host 级注册表视图)。 */
+  dashboard(): DashboardDto
   /** 目录页视图模型(全部已登记根 + 文件明细)。 */
   roots(): RootsView
   /** 手动登记一个根;非法路径由实现抛错(折叠为 internal)。 */
@@ -440,10 +440,9 @@ export interface PanelDeps {
   setConfig(patch: Record<string, unknown>): Promise<PanelConfigItem[]>
 }
 
-/** `entries` 请求载荷。 */
+/** `entries` 请求载荷(host 级注册表视图,不再携带 cwd)。 */
 interface EntriesPayload {
   acToken: string
-  cwd?: string
   filters?: {
     type?: MemoryType
     domain?: DomainId
@@ -452,15 +451,9 @@ interface EntriesPayload {
   }
 }
 
-/** 只带 token 的请求载荷(config-get)。 */
+/** 只带 token 的请求载荷(config-get / roots-get / nodes-get / dashboard-get)。 */
 interface TokenPayload {
   acToken: string
-}
-
-/** `dashboard-get` 请求载荷(可选 cwd,同 entries 的缺省回退)。 */
-interface DashboardPayload {
-  acToken: string
-  cwd?: string
 }
 
 /** `root-add` / `root-forget` 请求载荷。 */
@@ -483,7 +476,6 @@ interface ConfigSetPayload {
 
 const ENTRIES_PAYLOAD: z<EntriesPayload> = z.object({
   acToken: z.string().min(1).required(),
-  cwd: z.string().min(1),
   filters: z.object({
     type: z.union([...MEMORY_TYPES]),
     domain: z.union([...DOMAINS]),
@@ -494,11 +486,6 @@ const ENTRIES_PAYLOAD: z<EntriesPayload> = z.object({
 
 const TOKEN_PAYLOAD: z<TokenPayload> = z.object({
   acToken: z.string().min(1).required(),
-})
-
-const DASHBOARD_PAYLOAD: z<DashboardPayload> = z.object({
-  acToken: z.string().min(1).required(),
-  cwd: z.string().min(1),
 })
 
 const ROOT_PATH_PAYLOAD: z<RootPathPayload> = z.object({
@@ -568,14 +555,13 @@ export async function handlePanelRpc(
         if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
         const parsed = parsePayload(ENTRIES_PAYLOAD, payload)
         if (!parsed.ok) return panelError('bad-request', parsed.message)
-        const { cwd, filters } = parsed.value
-        return { ok: true, value: { entries: deps.entries(cwd, filters ?? {}) } }
+        return { ok: true, value: { entries: deps.entries(parsed.value.filters ?? {}) } }
       }
       case 'dashboard-get': {
         if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
-        const parsed = parsePayload(DASHBOARD_PAYLOAD, payload)
+        const parsed = parsePayload(TOKEN_PAYLOAD, payload)
         if (!parsed.ok) return panelError('bad-request', parsed.message)
-        return { ok: true, value: { dashboard: deps.dashboard(parsed.value.cwd) } }
+        return { ok: true, value: { dashboard: deps.dashboard() } }
       }
       case 'roots-get': {
         if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')

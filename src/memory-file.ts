@@ -27,6 +27,11 @@ import { parseRecallLine } from './team.js'
 /** 内置记忆目录(包内 `lmemory/`);无内容时不存在,发现时跳过。 */
 const BUILTIN_MEMORY_DIR = fileURLToPath(new URL('../lmemory', import.meta.url))
 
+/** 内置记忆目录路径(host 级面板视图把内置层并入注册表根一起读取)。 */
+export function builtinMemoryDir(): string {
+  return BUILTIN_MEMORY_DIR
+}
+
 /** dsh home 环境变量覆盖(默认 `~/.dsh`)。 */
 const DSH_HOME_ENV = 'DSH_HOME'
 
@@ -168,8 +173,15 @@ function readJsonl(jsonlPath: string): MemoryEntry[] {
   return readJsonlMigrating(jsonlPath).entries
 }
 
-/** 从给定目录按类型读取所有 jsonl 文件(按路径排序)。 */
-function loadDir(dir: string): MemoryFile[] {
+/**
+ * 从给定目录读取所有 `.remember.jsonl` 记忆文件(按路径排序)。
+ * 每个文件独立成项,不做跨目录 basename 合并——host 级注册表视图
+ * (不同根是各自独立的数据)需要这种无合并读取;单 cwd 视图仍走
+ * {@link discoverFiles} 的合并语义。
+ * @param dir - 记忆目录绝对路径。
+ * @returns 该目录下的记忆文件列表(目录不存在为空)。
+ */
+export function loadDir(dir: string): MemoryFile[] {
   if (!existsSync(dir)) return []
   const files: MemoryFile[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

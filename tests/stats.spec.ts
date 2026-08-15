@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { computeStats, EMPTY_USAGE, estimateTokens, recordUsage } from '../src/stats.js'
+import { computeStats, computeStatsIn, EMPTY_USAGE, estimateTokens, recordUsage } from '../src/stats.js'
 
 let project: string
 let dshHome: string
@@ -82,6 +82,27 @@ describe('computeStats', () => {
     const stats = computeStats(project)
     expect(stats.catalogEntries).toBe(0)
     expect(stats.total).toBe(0)
+  })
+})
+
+describe('computeStatsIn', () => {
+  it('aggregates explicit dirs without merging same-basename files across roots', () => {
+    const dirA = mkdtempSync(join(tmpdir(), 'dsh-memory-stats-a-'))
+    const dirB = mkdtempSync(join(tmpdir(), 'dsh-memory-stats-b-'))
+    const row = (seq: number, entry: string) => JSON.stringify({ id: `m-000000000${seq}`, schemaVersion: 1, type: 'rules', domain: 'Style', scope: '全项目', layer: 'project', entry, entryPoint: '-', references: '-' })
+    writeFileSync(join(dirA, '2026-08-14.rules.remember.jsonl'), `${row(1, 'A 条目')}\n`)
+    writeFileSync(join(dirB, '2026-08-14.rules.remember.jsonl'), `${row(2, 'B 条目')}\n`)
+
+    const stats = computeStatsIn([dirA, dirB])
+    expect(stats.total).toBe(2) // 同名 basename 不合并,两个根各计一份
+    expect(stats.files).toBe(2)
+    // 重复路径去重,不存在的目录跳过。
+    const dedupe = computeStatsIn([dirA, dirA, join(tmpdir(), 'nope')])
+    expect(dedupe.total).toBe(1)
+    expect(dedupe.files).toBe(1)
+
+    rmSync(dirA, { recursive: true, force: true })
+    rmSync(dirB, { recursive: true, force: true })
   })
 })
 

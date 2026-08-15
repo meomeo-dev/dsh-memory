@@ -28,9 +28,9 @@ GET  /memory?ac_token=<t>          → 记忆页 HTML 壳(403 当 token 缺失/�
 GET  /memory/settings?ac_token=<t> → 设置页 HTML 壳(同上)
 GET  /memory-assets/<file>?ac_token=<t> → 静态资源(白名单后缀 .js/.css/.map/.svg/.png/.woff2,
                                      单段文件名、拒绝 .. 与分隔符,防路径穿越)
-POST /memory-api/entries    { acToken, cwd?, filters?: { type?, domain?, layer?, query? } }
-                            → { entries: [{ entry(含 createdAt), file }] },按 createdAt 降序
-POST /memory-api/dashboard-get { acToken, cwd? } → { dashboard: { status, stats, usage } }
+POST /memory-api/entries    { acToken, filters?: { type?, domain?, layer?, query? } }
+                            → { entries: [{ entry(含 createdAt), file(绝对路径) }] },按 createdAt 降序
+POST /memory-api/dashboard-get { acToken } → { dashboard: { status, stats, usage } }
   状态页一次取齐的视图模型:team 状态(maxNodeKb + 各 root 节点数)、记忆统计
   (总条目 / rules / lessons / 各层 / domain 分布 / 文件字节 / catalog)、token 用量
   (预热 team 与摘要的估算 + 本进程 recall/extract/review 调用消耗 + 近 84 天
@@ -52,7 +52,7 @@ POST /memory-api/nodes-get { acToken } → { processes: [ ProcessRow ] }
 
 RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload}` / `{type:"server-response",rpcId,result:{ok,value}}`;错误码只用 `bad-request`(载荷/token 非法)与 `internal`(依赖抛错)。
 
-面板缺省显示「dsh web 进程启动目录」的项目层记忆 + 内置/用户层(`cwd` 载荷可显式指定其他项目)。Timeline 依赖的 `createdAt` 由 schema v2 提供(v1 旧数据由迁移 0002 按文件名日期回填,见 data-contract.md)。
+面板记忆页 / 状态页统计为 **host 级注册表视图**:内置层 + 注册表中仍存在的全部根(与目录页同一数据源,见 docs/storage-and-collections.md §Q2);`file` 字段为绝对路径以区分同名文件的不同根。会话级可见记忆(模型工具 / `/lmemory` 命令)仍走 cwd 视图——两个视图语义不同,不是读取逻辑漂移。Timeline 依赖的 `createdAt` 由 schema v2 提供(v1 旧数据由迁移 0002 按文件名日期回填,见 data-contract.md)。
 
 ## 页面
 

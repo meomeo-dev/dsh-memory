@@ -10,7 +10,8 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { discoverFiles, visibleMemoryDirs } from './memory-file.js'
+import { discoverFiles, loadDir, visibleMemoryDirs } from './memory-file.js'
+import type { MemoryFile } from './memory-file.js'
 import type { DomainId, LayerId, MemoryType } from './schema.js'
 
 /** 记忆统计(给定 cwd 可见的全部记忆)。 */
@@ -56,7 +57,30 @@ function readCatalogEntries(dir: string): number {
  * @returns 统计结果(无记忆时各项为 0 / 空)。
  */
 export function computeStats(cwd?: string): MemoryStats {
-  const files = discoverFiles(cwd)
+  return aggregateStats(discoverFiles(cwd), visibleMemoryDirs(cwd))
+}
+
+/**
+ * 在显式给出的记忆目录列表上计算统计(host 级注册表视图用)。
+ *
+ * 与 {@link computeStats} 的差别:不做跨目录 basename 合并——不同根是各自
+ * 独立的数据,合并会吞掉不同项目的同名文件;单 cwd 视图仍走
+ * {@link discoverFiles} 的合并语义。
+ * @param dirs - 记忆目录绝对路径列表(去重后遍历;不存在的目录跳过)。
+ * @returns 统计结果(无记忆时各项为 0 / 空)。
+ */
+export function computeStatsIn(dirs: readonly string[]): MemoryStats {
+  const unique = [...new Set(dirs)]
+  const files: MemoryFile[] = []
+  for (const dir of unique) {
+    if (!existsSync(dir)) continue
+    files.push(...loadDir(dir))
+  }
+  return aggregateStats(files, unique)
+}
+
+/** 聚合一组记忆文件的统计(共享循环;catalog 条目按给定目录求和)。 */
+function aggregateStats(files: readonly MemoryFile[], catalogDirs: readonly string[]): MemoryStats {
   const byType: Record<MemoryType, number> = { rules: 0, lessons: 0 }
   const byLayer: Record<LayerId, number> = { global: 0, user: 0, project: 0 }
   const byDomain = new Map<DomainId, number>()
@@ -79,7 +103,7 @@ export function computeStats(cwd?: string): MemoryStats {
     files: files.length,
     jsonlBytes,
     mdBytes,
-    catalogEntries: visibleMemoryDirs(cwd).reduce((sum, dir) => sum + readCatalogEntries(dir), 0),
+    catalogEntries: catalogDirs.reduce((sum, dir) => sum + readCatalogEntries(dir), 0),
   }
 }
 
