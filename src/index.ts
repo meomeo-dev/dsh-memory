@@ -76,9 +76,9 @@ import {
 import type { ExtractFn, TranscriptMessage } from './extract.js'
 import { computeStats, computeStatsIn, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.js'
 import type { UsageCounter } from './stats.js'
-import { aggregateByDay, aggregateWindowTotals, appendUsageRow, readUsageRows } from './usage-log.js'
+import { aggregateByDay, aggregateByHour, aggregateWindowTotals, appendUsageRow, readUsageRows } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
-import { costFor, estimateWindowCosts, loadPricing, pricingPath } from './pricing.js'
+import { costFor, estimateDailyCosts, estimateHourlyCosts, estimateWindowCosts, loadPricing, pricingPath } from './pricing.js'
 import { aggregateEntryActivity } from './memory-activity.js'
 import {
   RUNTIME_HEARTBEAT_MS,
@@ -793,9 +793,25 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
         // costs 即时估算(docs/pricing-and-cost.md):价格表唯一持久化事实,cost 不落盘。
         const usageRows = readUsageRows()
         const pricing = loadPricing()
+        const modelFallback = (label: UsageLogRow['label']): string =>
+          label === 'review' ? runtime.config.reviewModel : runtime.config.model
         const costs = pricing.ok
-          ? estimateWindowCosts(pricing.table, usageRows, 14, label => label === 'review' ? runtime.config.reviewModel : runtime.config.model)
+          ? {
+              ...estimateWindowCosts(pricing.table, usageRows, 14, modelFallback),
+              daily: estimateDailyCosts(pricing.table, usageRows, 14, modelFallback),
+            }
           : { perLabel: [], totalYuan: 0, incomplete: false, error: pricing.error }
+        // 小时聚合(近 14 天 × 24 桶)+ 该小时估算成本合并进桶(缺价桶 yuan 缺省)。
+        const hourlyCosts = pricing.ok ? estimateHourlyCosts(pricing.table, usageRows, 14, modelFallback) : undefined
+        const hourly = aggregateByHour(usageRows, 14).map((bucket, index) => {
+          const cost = hourlyCosts?.[index]
+          if (cost === undefined) return bucket
+          return {
+            ...bucket,
+            ...(cost.yuan === undefined ? {} : { yuan: cost.yuan }),
+            missingPricingRows: cost.missingPricingRows,
+          }
+        })
         return {
           status: {
             maxNodeKb: runtime.config.maxNodeKb,
@@ -819,6 +835,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
             summary: { chars: summaryChars, tokens: estimateTokens(summaryChars) },
             totals: aggregateWindowTotals(usageRows, 14).map(({ label, calls, inputTokens, outputTokens, cacheReadTokens }) => ({ label, calls, inputTokens, outputTokens, cacheReadTokens })),
             daily: aggregateByDay(usageRows, 84),
+            hourly,
             costs,
           },
           // 记忆活动大表(docs/memory-activity.md):按条目 createdAt 实时聚合,不落盘。

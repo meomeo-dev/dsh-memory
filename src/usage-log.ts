@@ -57,6 +57,20 @@ export interface DayUsage {
   readonly total: number
 }
 
+/** 某一个小时桶的聚合视图(三职责 + 合计;与 {@link DayUsage} 同口径)。 */
+export interface HourUsage {
+  /** 本地日期 `YYYY-MM-DD`。 */
+  readonly day: string
+  /** 本地小时 0..23(该小时的起始时刻)。 */
+  readonly hour: number
+  /** 各职责聚合。 */
+  readonly recall: LabelDayUsage
+  readonly extract: LabelDayUsage
+  readonly review: LabelDayUsage
+  /** 该小时全部 token 合计。 */
+  readonly total: number
+}
+
 /** usage.jsonl 的固定路径(用户 lmemory 根内)。 */
 export function usageLogPath(): string {
   return join(dshHome(), 'lmemory', 'usage.jsonl')
@@ -189,6 +203,47 @@ export interface WindowTotals {
   readonly cacheReadTokens: number
   /** 窗口内该职责 token 合计(input + output + cacheRead)。 */
   readonly totalTokens: number
+}
+
+/** 零值小时聚合。 */
+function emptyHour(day: string, hour: number): HourUsage {
+  return { day, hour, recall: emptyLabel(), extract: emptyLabel(), review: emptyLabel(), total: 0 }
+}
+
+/** 本地小时数 0..23。 */
+function localHour(ts: number): number {
+  return new Date(ts).getHours()
+}
+
+/**
+ * 按本地小时聚合 usage 日志,零填充近 `days` 个自然日 × 24 桶(与
+ * {@link aggregateByDay} 同窗、同口径——日聚合 = 小时聚合按日求和,数学恒等)。
+ * @param rows - 日志行(由 {@link readUsageRows} 读取)。
+ * @param days - 聚合天数(1..90;越界由调用方约束)。
+ * @param now - 参照时刻(测试注入)。
+ * @returns 近 `days` 天的小时聚合(升序,`days×24` 桶)。
+ */
+export function aggregateByHour(rows: readonly UsageLogRow[], days: number, now: number = Date.now()): HourUsage[] {
+  const daysList = recentDays(days, now)
+  const buckets: HourUsage[] = []
+  const byKey = new Map<string, number>()
+  for (const day of daysList) {
+    for (let hour = 0; hour < 24; hour++) {
+      buckets.push(emptyHour(day, hour))
+      byKey.set(`${day}T${hour}`, buckets.length - 1)
+    }
+  }
+  for (const row of rows) {
+    const index = byKey.get(`${localDay(row.ts)}T${localHour(row.ts)}`)
+    if (index === undefined) continue
+    const bucket = buckets[index]!
+    buckets[index] = {
+      ...bucket,
+      [row.label]: addToLabel(bucket[row.label], row),
+      total: bucket.total + row.inputTokens + row.outputTokens + row.cacheReadTokens,
+    }
+  }
+  return buckets
 }
 
 /**

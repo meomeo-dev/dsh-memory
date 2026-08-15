@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   beijingTime,
   costFor,
+  estimateDailyCosts,
+  estimateHourlyCosts,
   estimateWindowCosts,
   isPeakBeijing,
   loadPricing,
@@ -128,6 +130,46 @@ describe('cost estimation', () => {
     estimateWindowCosts(table, rows, 14, () => 'deepseek-v4-flash')
     const after = new Set(readdirSync(dshHome))
     expect([...after].filter(name => !before.has(name))).toEqual([])
+  })
+
+  it('estimateDailyCosts: per-day costs zero-filled, missing-price days marked', () => {
+    const table = seedPricing(0)
+    // 本地中午参照;行落在本地今天 09:00 与昨天 09:00(本地时区)。
+    const now = new Date(2026, 7, 14, 12, 0, 0).getTime()
+    const t0 = new Date(2026, 7, 14, 9, 0, 0).getTime()
+    const t1 = new Date(2026, 7, 13, 9, 0, 0).getTime()
+    const rows: UsageLogRow[] = [
+      row(t0, { model: 'deepseek-v4-flash', inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0 }),
+      row(t1, { model: 'unknown-model' }),
+    ]
+    const fallback = (): string => 'deepseek-v4-flash'
+    const daily = estimateDailyCosts(table, rows, 2, fallback, now)
+    expect(daily.map(entry => entry.day)).toEqual(['2026-08-13', '2026-08-14'])
+    // 今天:现行价 1 元/M input → 1 元。
+    expect(daily[1]!.yuan).toBeCloseTo(1, 10)
+    expect(daily[1]!.missingPricingRows).toBe(0)
+    // 昨天:缺价行 → yuan undefined + missing。
+    expect(daily[0]!.yuan).toBeUndefined()
+    expect(daily[0]!.missingPricingRows).toBe(1)
+  })
+
+  it('estimateHourlyCosts: per-hour costs zero-filled, aligned with aggregateByHour buckets', () => {
+    const table = seedPricing(0)
+    const now = new Date(2026, 7, 14, 12, 0, 0).getTime()
+    const t0 = new Date(2026, 7, 14, 9, 30, 0).getTime()
+    const t1 = new Date(2026, 7, 14, 10, 15, 0).getTime()
+    const rows: UsageLogRow[] = [
+      row(t0, { model: 'deepseek-v4-flash', inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0 }),
+      row(t1, { model: 'unknown-model' }),
+    ]
+    const hourly = estimateHourlyCosts(table, rows, 2, () => 'deepseek-v4-flash', now)
+    expect(hourly).toHaveLength(48)
+    expect(hourly[0]).toMatchObject({ day: '2026-08-13', hour: 0, yuan: 0, missingPricingRows: 0 })
+    const b9 = hourly.find(bucket => bucket.day === '2026-08-14' && bucket.hour === 9)!
+    expect(b9.yuan).toBeCloseTo(1, 10)
+    const b10 = hourly.find(bucket => bucket.day === '2026-08-14' && bucket.hour === 10)!
+    expect(b10.yuan).toBeUndefined()
+    expect(b10.missingPricingRows).toBe(1)
   })
 })
 

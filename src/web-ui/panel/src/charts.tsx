@@ -3,7 +3,7 @@
  * 配色镜像 dsh 设计令牌(deepseek 蓝系 + amber)。样式在 ./charts.css。
  */
 import { useMemo } from 'react'
-import type { Dashboard, DayUsage } from './api'
+import type { Dashboard, DayUsage, HourUsage } from './api'
 import { formatCompact, formatBytes } from './format'
 import './charts.css'
 
@@ -112,24 +112,90 @@ export function StaticBars({ usage }: { readonly usage: Dashboard['usage'] }): J
   )
 }
 
-/** 近 14 天每日用量:紧凑水平条形图(日期 | 三段条 | 总 token,单行一项),整行大图。 */
-export function DailyBars({ daily }: { readonly daily: readonly DayUsage[] }): JSX.Element {
+/** 某天的成本文案:无调用显示 `—`,缺价显示 `—(缺价 N 行)`,否则两位小数。 */
+function dayCostText(day: DayUsage, cost: { readonly yuan?: number; readonly missingPricingRows: number } | undefined): string {
+  if (day.total === 0) return '—'
+  if (cost === undefined) return '—'
+  if (cost.yuan === undefined) return `—(缺价 ${cost.missingPricingRows} 行)`
+  return `¥${cost.yuan.toFixed(2)}`
+}
+
+/** 近 14 天每日用量:紧凑水平条形图(日期 | 三段条 | 总 token | 当日成本,单行一项)。
+ *  行可点击:选中某天后在其下方就地展开该天 24 小时水平柱状图(行高收窄);
+ *  底部合计行在总 token 右侧显示近 14 天成本合计(docs/status-page-usage.md)。 */
+export function DailyBars({ daily, hourly, costs, selectedDay, onSelect }: {
+  readonly daily: readonly DayUsage[]
+  readonly hourly?: readonly HourUsage[]
+  readonly costs?: Dashboard['usage']['costs']
+  readonly selectedDay: string | undefined
+  readonly onSelect: (day: string | undefined) => void
+}): JSX.Element {
   const windowDays = daily.slice(-14)
   const maxTotal = Math.max(1, ...windowDays.map(day => day.total))
   const width = (value: number): string => `${(value / maxTotal) * 100}%`
+  const hoursOf = (day: string): HourUsage[] => (hourly ?? []).filter(bucket => bucket.day === day)
+  const totalTokens = windowDays.reduce((sum, day) => sum + day.total, 0)
+  const totalCalls = windowDays.reduce((sum, day) => sum + day.recall.calls + day.extract.calls + day.review.calls, 0)
   return (
     <div className="hbars">
-      {windowDays.map(day => (
-        <div className="hbar-row" key={day.day}>
-          <span className="hbar-label mono">{day.day.slice(5)}</span>
-          <div className="hbar-track">
-            <span className="hbar-seg" style={{ width: width(day.recall.totalTokens), background: CHART_COLORS.recall }} title={`recall ${day.recall.totalTokens.toLocaleString()}`} />
-            <span className="hbar-seg" style={{ width: width(day.extract.totalTokens), background: CHART_COLORS.extract }} title={`extract ${day.extract.totalTokens.toLocaleString()}`} />
-            <span className="hbar-seg" style={{ width: width(day.review.totalTokens), background: CHART_COLORS.review }} title={`review ${day.review.totalTokens.toLocaleString()}`} />
+      {windowDays.map(day => {
+        const selected = selectedDay === day.day
+        const dayCost = costs?.daily?.find(entry => entry.day === day.day)
+        return (
+          <div className="hbar-group" key={day.day}>
+            <div
+              className={`hbar-row clickable${selected ? ' selected' : ''}`}
+              role="button"
+              tabIndex={0}
+              title={selected ? '收起该天 24 小时视图' : '展开该天 24 小时视图'}
+              onClick={() => onSelect(selected ? undefined : day.day)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onSelect(selected ? undefined : day.day)
+                }
+              }}
+            >
+              <span className="hbar-label mono">{day.day.slice(5)}</span>
+              <div className="hbar-track">
+                <span className="hbar-seg" style={{ width: width(day.recall.totalTokens), background: CHART_COLORS.recall }} title={`recall ${day.recall.totalTokens.toLocaleString()}`} />
+                <span className="hbar-seg" style={{ width: width(day.extract.totalTokens), background: CHART_COLORS.extract }} title={`extract ${day.extract.totalTokens.toLocaleString()}`} />
+                <span className="hbar-seg" style={{ width: width(day.review.totalTokens), background: CHART_COLORS.review }} title={`review ${day.review.totalTokens.toLocaleString()}`} />
+              </div>
+              <span className="hbar-metric">{day.total > 0 ? formatCompact(day.total) : '—'}</span>
+              {costs !== undefined && <span className="hbar-cost">{dayCostText(day, dayCost)}</span>}
+            </div>
+            {selected && (
+              <div className="hour-bars">
+                {hoursOf(day.day).map(bucket => (
+                  <div className="hour-row" key={bucket.hour}>
+                    <span className="hbar-label mono">{String(bucket.hour).padStart(2, '0')}:00</span>
+                    <div className="hbar-track">
+                      <span className="hbar-seg" style={{ width: width(bucket.recall.totalTokens), background: CHART_COLORS.recall }} title={`recall ${bucket.recall.totalTokens.toLocaleString()}`} />
+                      <span className="hbar-seg" style={{ width: width(bucket.extract.totalTokens), background: CHART_COLORS.extract }} title={`extract ${bucket.extract.totalTokens.toLocaleString()}`} />
+                      <span className="hbar-seg" style={{ width: width(bucket.review.totalTokens), background: CHART_COLORS.review }} title={`review ${bucket.review.totalTokens.toLocaleString()}`} />
+                    </div>
+                    <span className="hbar-metric">{bucket.total > 0 ? formatCompact(bucket.total) : '—'}</span>
+                    {costs !== undefined && <span className="hbar-cost" />}
+                  </div>
+                ))}
+                {hoursOf(day.day).length === 0 && <p className="meta">该天无小时数据(旧 host 进程,重启后可用)。</p>}
+              </div>
+            )}
           </div>
-          <span className="hbar-metric">{day.total > 0 ? formatCompact(day.total) : '—'}</span>
-        </div>
-      ))}
+        )
+      })}
+      <div className="daily-total">
+        <span className="daily-total-label">合计</span>
+        <span className="daily-total-metric">{formatCompact(totalTokens)} tok · {totalCalls.toLocaleString()} calls</span>
+        {costs !== undefined && (
+          <span className="daily-total-cost">
+            {costs.error !== undefined
+              ? '—(价格表不可用)'
+              : `¥${costs.totalYuan.toFixed(2)}${costs.incomplete ? '(部分职责缺价,未计入)' : ''}`}
+          </span>
+        )}
+      </div>
       <div className="legend">
         {([['recall', 'recall'], ['extract', 'extract'], ['review', 'review']] as const).map(([key, label]) => (
           <div className="legend-row" key={key}>
@@ -140,6 +206,24 @@ export function DailyBars({ daily }: { readonly daily: readonly DayUsage[] }): J
       </div>
     </div>
   )
+}
+
+/** 今天(自然日,00:00 起)的 LLM 调用消耗小图:与「近 14 天」小图同款 StackedBars,
+ *  数据 = 今天 24 个 hourly 桶按职责汇总(docs/status-page-usage.md)。 */
+export function TodayBars({ hourly }: { readonly hourly?: readonly HourUsage[] }): JSX.Element {
+  const buckets = hourly ?? []
+  const today = buckets.length > 0 ? buckets[buckets.length - 1]!.day : undefined
+  const dayBuckets = today === undefined ? [] : buckets.filter(bucket => bucket.day === today)
+  const rows = (['recall', 'extract', 'review'] as const).map(label => ({
+    label,
+    calls: dayBuckets.reduce((sum, bucket) => sum + bucket[label].calls, 0),
+    inputTokens: dayBuckets.reduce((sum, bucket) => sum + bucket[label].inputTokens, 0),
+    outputTokens: dayBuckets.reduce((sum, bucket) => sum + bucket[label].outputTokens, 0),
+    cacheReadTokens: dayBuckets.reduce((sum, bucket) => sum + bucket[label].cacheReadTokens, 0),
+  }))
+  const totalCalls = rows.reduce((sum, row) => sum + row.calls, 0)
+  if (totalCalls === 0) return <p className="meta">今天尚无 LLM 调用。</p>
+  return <StackedBars rows={rows} />
 }
 
 /** 日总 token → 热力强度档(5 档)。 */

@@ -337,6 +337,23 @@ export interface DashboardDaily {
   readonly total: number
 }
 
+/** 状态页某个小时桶的聚合(镜像 usage-log 的 HourUsage;cost 字段由 pricing 合并)。 */
+export interface DashboardHourly {
+  /** 本地日期 `YYYY-MM-DD`。 */
+  readonly day: string
+  /** 本地小时 0..23。 */
+  readonly hour: number
+  readonly recall: DashboardLabelUsage
+  readonly extract: DashboardLabelUsage
+  readonly review: DashboardLabelUsage
+  /** 该小时全部 token 合计。 */
+  readonly total: number
+  /** 该小时估算成本(元);缺价时缺省。 */
+  readonly yuan?: number
+  /** 该小时缺价(无价格记录)的调用行数。 */
+  readonly missingPricingRows?: number
+}
+
 /** 状态页的完整视图模型(status / stats / usage 三区,一次 RPC 取齐)。 */
 export interface DashboardDto {
   /** 顶部:记忆 team 状态。 */
@@ -376,11 +393,16 @@ export interface DashboardDto {
     readonly totals: readonly DashboardUsageRow[]
     /** 近 84 天按日聚合(usage.jsonl,零填充,升序;柱状图取后 14 天,热力图用全部)。 */
     readonly daily: readonly DashboardDaily[]
+    /** 近 14 天 × 24 小时聚合(升序,336 桶;daily = hourly 按日求和,数学恒等)。
+     *  可选字段:旧 host 进程不返回,面板须优雅降级(不展开、今天图显示空态)。 */
+    readonly hourly?: readonly DashboardHourly[]
     /** 近 14 天估算成本(即时计算、不落盘,见 docs/pricing-and-cost.md;价格表损坏时带 error)。 */
     readonly costs: {
       readonly perLabel: readonly { readonly label: string; readonly calls: number; readonly yuan?: number; readonly missingPricingRows: number }[]
       readonly totalYuan: number
       readonly incomplete: boolean
+      /** 近 14 天逐日成本(与 daily 最后 14 天对齐;价格表损坏时缺省)。 */
+      readonly daily?: readonly { readonly day: string; readonly yuan?: number; readonly missingPricingRows: number }[]
       readonly error?: string
     }
   }

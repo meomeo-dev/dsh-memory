@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { aggregateByDay, aggregateWindowTotals, appendUsageRow, localDay, readUsageRows, recentDays, usageLogPath } from '../src/usage-log.js'
+import { aggregateByDay, aggregateByHour, aggregateWindowTotals, appendUsageRow, localDay, readUsageRows, recentDays, usageLogPath } from '../src/usage-log.js'
 import type { UsageLogRow } from '../src/usage-log.js'
 
 let dshHome: string
@@ -89,6 +89,59 @@ describe('aggregateByDay', () => {
     const old = new Date(2026, 7, 1, 9, 0, 0).getTime()
     const daily = aggregateByDay([row(old)], 3, now)
     expect(daily.reduce((sum, day) => sum + day.total, 0)).toBe(0)
+  })
+})
+
+describe('aggregateByHour', () => {
+  const now = new Date(2026, 7, 14, 12, 0, 0).getTime()
+  const h0 = new Date(2026, 7, 14, 9, 0, 0).getTime()
+  const h1 = new Date(2026, 7, 14, 9, 30, 0).getTime()
+  const h2 = new Date(2026, 7, 14, 10, 15, 0).getTime()
+  const prevDay = new Date(2026, 7, 13, 23, 0, 0).getTime()
+  const rows = [
+    row(h0),
+    row(h1, { label: 'review', inputTokens: 8, outputTokens: 4, cacheReadTokens: 0 }),
+    row(h2, { label: 'extract', inputTokens: 20, outputTokens: 10, cacheReadTokens: 5 }),
+    row(prevDay),
+  ]
+
+  it('zero-fills days x 24 buckets ascending', () => {
+    const hourly = aggregateByHour(rows, 2, now)
+    expect(hourly).toHaveLength(48)
+    expect(hourly[0]).toMatchObject({ day: '2026-08-13', hour: 0, total: 0 })
+    expect(hourly[47]).toMatchObject({ day: '2026-08-14', hour: 23 })
+  })
+
+  it('buckets rows per local hour with per-label totals', () => {
+    const hourly = aggregateByHour(rows, 2, now)
+    // 8-13 23:00:recall 1 次 175 tokens。
+    const b23 = hourly.find(bucket => bucket.day === '2026-08-13' && bucket.hour === 23)!
+    expect(b23.recall.calls).toBe(1)
+    expect(b23.total).toBe(175)
+    // 8-14 09:00:recall 1 次 + review 1 次 = 187。
+    const b9 = hourly.find(bucket => bucket.day === '2026-08-14' && bucket.hour === 9)!
+    expect(b9.recall.calls).toBe(1)
+    expect(b9.review.calls).toBe(1)
+    expect(b9.total).toBe(187)
+    // 8-14 10:00:extract 1 次 35。
+    const b10 = hourly.find(bucket => bucket.day === '2026-08-14' && bucket.hour === 10)!
+    expect(b10.extract.totalTokens).toBe(35)
+    expect(b10.total).toBe(35)
+  })
+
+  it('daily equals hourly summed per day (math identity)', () => {
+    const daily = aggregateByDay(rows, 2, now)
+    const hourly = aggregateByHour(rows, 2, now)
+    for (const day of daily) {
+      const fromHourly = hourly.filter(bucket => bucket.day === day.day).reduce((sum, bucket) => sum + bucket.total, 0)
+      expect(day.total).toBe(fromHourly)
+    }
+  })
+
+  it('drops rows outside the window', () => {
+    const old = new Date(2026, 7, 1, 9, 0, 0).getTime()
+    const hourly = aggregateByHour([row(old)], 2, now)
+    expect(hourly.reduce((sum, bucket) => sum + bucket.total, 0)).toBe(0)
   })
 })
 

@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { dshHome } from './memory-file.js'
+import { localDay, recentDays } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
 
 /** 价格表格式版本(结构变化时递增;读取端只认格式,不认识视为损坏)。 */
@@ -304,4 +305,99 @@ export function estimateWindowCosts(
   }
   // 合计恒返回可计算部分(缺价职责另计 missingPricingRows);incomplete 标记完整性。
   return { perLabel, totalYuan, incomplete }
+}
+
+/** 某一天的估算成本(yuan 为 undefined = 该天存在缺价行;空天 yuan = 0)。 */
+export interface DayCost {
+  /** 本地日期 `YYYY-MM-DD`(与 aggregateByDay 同日序)。 */
+  readonly day: string
+  /** 当天估算成本(元);缺价时为 undefined。 */
+  readonly yuan?: number
+  /** 当天缺价(无价格记录)的调用行数。 */
+  readonly missingPricingRows: number
+}
+
+/** 某个小时桶的估算成本(yuan 为 undefined = 该小时存在缺价行;空桶 yuan = 0)。 */
+export interface HourCost {
+  /** 本地日期 `YYYY-MM-DD`(与 aggregateByHour 同桶序)。 */
+  readonly day: string
+  /** 本地小时 0..23。 */
+  readonly hour: number
+  /** 该小时估算成本(元);缺价时为 undefined。 */
+  readonly yuan?: number
+  /** 该小时缺价(无价格记录)的调用行数。 */
+  readonly missingPricingRows: number
+}
+
+/**
+ * 逐日聚合近 `days` 天的估算成本(零填充,与 {@link aggregateByDay} 同日序;
+ * 不落盘,纯计算)。逐行 {@link costFor},缺价行计 missing 不静默为 0。
+ * @param table - 价格表。
+ * @param rows - usage 日志行。
+ * @param days - 窗口天数。
+ * @param fallback - label → 模型 id 映射。
+ * @param now - 参照时刻(测试注入)。
+ * @returns 近 `days` 天的日成本(升序)。
+ */
+export function estimateDailyCosts(
+  table: PricingTable,
+  rows: readonly UsageLogRow[],
+  days: number,
+  fallback: ModelFallback,
+  now: number = Date.now(),
+): DayCost[] {
+  const cutoff = now - days * 24 * 3600_000
+  const daysList = recentDays(days, now)
+  const byDay = new Map<string, DayCost>()
+  for (const day of daysList) byDay.set(day, { day, yuan: 0, missingPricingRows: 0 })
+  for (const row of rows) {
+    if (row.ts < cutoff) continue
+    const entry = byDay.get(localDay(row.ts))
+    if (entry === undefined) continue
+    const cost = costFor(table, row.model ?? fallback(row.label), row.ts, row.inputTokens, row.cacheReadTokens, row.outputTokens)
+    byDay.set(entry.day, cost === undefined
+      ? { ...entry, yuan: undefined, missingPricingRows: entry.missingPricingRows + 1 }
+      : { ...entry, yuan: (entry.yuan ?? 0) + cost })
+  }
+  return daysList.map(day => byDay.get(day)!)
+}
+
+/**
+ * 逐小时聚合近 `days` 天的估算成本(零填充,与 {@link aggregateByHour} 同桶序;
+ * 不落盘,纯计算)。逐行 {@link costFor},缺价行计 missing 不静默为 0。
+ * @param table - 价格表。
+ * @param rows - usage 日志行。
+ * @param days - 窗口天数。
+ * @param fallback - label → 模型 id 映射。
+ * @param now - 参照时刻(测试注入)。
+ * @returns 近 `days` 天的小时成本(升序,`days×24` 桶)。
+ */
+export function estimateHourlyCosts(
+  table: PricingTable,
+  rows: readonly UsageLogRow[],
+  days: number,
+  fallback: ModelFallback,
+  now: number = Date.now(),
+): HourCost[] {
+  const cutoff = now - days * 24 * 3600_000
+  const daysList = recentDays(days, now)
+  const buckets: HourCost[] = []
+  const byKey = new Map<string, number>()
+  for (const day of daysList) {
+    for (let hour = 0; hour < 24; hour++) {
+      buckets.push({ day, hour, yuan: 0, missingPricingRows: 0 })
+      byKey.set(`${day}T${hour}`, buckets.length - 1)
+    }
+  }
+  for (const row of rows) {
+    if (row.ts < cutoff) continue
+    const index = byKey.get(`${localDay(row.ts)}T${new Date(row.ts).getHours()}`)
+    if (index === undefined) continue
+    const bucket = buckets[index]!
+    const cost = costFor(table, row.model ?? fallback(row.label), row.ts, row.inputTokens, row.cacheReadTokens, row.outputTokens)
+    buckets[index] = cost === undefined
+      ? { ...bucket, yuan: undefined, missingPricingRows: bucket.missingPricingRows + 1 }
+      : { ...bucket, yuan: (bucket.yuan ?? 0) + cost }
+  }
+  return buckets
 }

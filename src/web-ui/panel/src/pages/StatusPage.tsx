@@ -4,20 +4,29 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { rpc } from '../api'
-import type { Bootstrap, Dashboard } from '../api'
+import type { Bootstrap, Dashboard, HourUsage } from '../api'
 import { formatCompact, formatBytes } from '../format'
-import { CalendarHeatmap, CHART_COLORS, DailyBars, Donut, StackedBars, StaticBars } from '../charts'
+import { CalendarHeatmap, CHART_COLORS, DailyBars, Donut, StackedBars, StaticBars, TodayBars } from '../charts'
 import { ActivityTable } from './ActivityTable'
 import './status.css'
 
 /** 状态页自动刷新间隔:记忆活动大表是实时视图(docs/memory-activity.md)。 */
 const POLL_MS = 60_000
 
+/** 明细表成本单元文案(与一级表同规则;hourly 桶缺价时 yuan 缺省)。 */
+function hourCostText(bucket: HourUsage): string {
+  if (bucket.missingPricingRows !== undefined && bucket.missingPricingRows > 0) return `—(缺价 ${bucket.missingPricingRows} 行)`
+  if (bucket.yuan !== undefined) return bucket.yuan.toFixed(2)
+  return '—'
+}
+
 /** 状态页:顶部 team 状态 → 中部统计指标块 → 正文 usage 图表。 */
 export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JSX.Element {
   const [dashboard, setDashboard] = useState<Dashboard | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(true)
+  /** 每日图/明细表共享的选中天:点日行展开该天 24 小时视图(docs/status-page-usage.md)。 */
+  const [selectedDay, setSelectedDay] = useState<string | undefined>(undefined)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -120,7 +129,19 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
       <section className="charts-wide">
         <div className="card chart-card">
           <span className="section-title">近 14 天每日用量(host 级持久)</span>
-          <DailyBars daily={usage.daily} />
+          <DailyBars
+            daily={usage.daily}
+            hourly={usage.hourly}
+            costs={usage.costs}
+            selectedDay={selectedDay}
+            onSelect={setSelectedDay}
+          />
+        </div>
+      </section>
+      <section className="charts-pair">
+        <div className="card chart-card">
+          <span className="section-title">LLM 调用消耗(输入 / 输出 / 缓存读,今天(按日期))</span>
+          <TodayBars hourly={usage.hourly} />
         </div>
         <div className="card chart-card">
           <span className="section-title">近 12 周日历热力图(host 级持久)</span>
@@ -175,6 +196,45 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
             </tbody>
           </table>
         </div>
+        {selectedDay !== undefined && usage.hourly !== undefined && (
+          <div className="detail-wrap">
+            <p className="meta">按小时明细(与「近 14 天每日用量」选中天联动):{selectedDay} 00:00 – 24:00</p>
+            <div className="table-wrap">
+              <table className="detail-table">
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>调用次数</th>
+                    <th>输入 tokens</th>
+                    <th>输出 tokens</th>
+                    <th>缓存读 tokens</th>
+                    <th>合计 tokens</th>
+                    {usage.costs !== undefined && <th>估算成本 (¥)</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {usage.hourly.filter(bucket => bucket.day === selectedDay).map(bucket => {
+                    const calls = bucket.recall.calls + bucket.extract.calls + bucket.review.calls
+                    const input = bucket.recall.inputTokens + bucket.extract.inputTokens + bucket.review.inputTokens
+                    const output = bucket.recall.outputTokens + bucket.extract.outputTokens + bucket.review.outputTokens
+                    const cacheRead = bucket.recall.cacheReadTokens + bucket.extract.cacheReadTokens + bucket.review.cacheReadTokens
+                    return (
+                      <tr key={bucket.hour}>
+                        <td className="mono">{bucket.day.slice(5)} {String(bucket.hour).padStart(2, '0')}:00</td>
+                        <td className="mono">{calls.toLocaleString()}</td>
+                        <td className="mono">{input.toLocaleString()}</td>
+                        <td className="mono">{output.toLocaleString()}</td>
+                        <td className="mono">{cacheRead.toLocaleString()}</td>
+                        <td className="mono">{formatCompact(bucket.total)}</td>
+                        {usage.costs !== undefined && <td className="mono">{hourCostText(bucket)}</td>}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         {usage.costs !== undefined && (
           <p className="meta">
             近 14 天估算成本合计:{usage.costs.error !== undefined

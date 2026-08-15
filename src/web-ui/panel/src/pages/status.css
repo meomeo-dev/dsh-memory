@@ -44,11 +44,25 @@
   gap: 12px;
 }
 
-/* 整行大图(每日用量 / 日历热力图),不与三列小图混排。 */
+/* 整行大图(每日用量),不与小图混排。 */
 .charts-wide {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* 两列并排小图:今天(按日期)消耗 + 日历热力图(热力图缩成半宽小图;窄屏折行)。 */
+.charts-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+/* 明细表的按小时二级表(与每日图选中天联动)。 */
+.detail-wrap {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
 }
 
 .chart-card {

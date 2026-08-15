@@ -149,6 +149,82 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 日行右侧的当日成本(合计 token 的右侧);无调用/缺价显示 —。 */
+.hbar-cost {
+  flex: 0 0 96px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 日行可点击展开(纯 div 交互,role=button + 键盘);选中态高亮。 */
+.hbar-row.clickable {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 0;
+}
+
+.hbar-row.clickable:hover {
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.hbar-row.clickable.selected {
+  background: var(--dsw-static-deepseek-50);
+}
+
+/* 展开的 24 小时水平柱状图:行高收窄(~一级的一半),与一级行区分。 */
+.hour-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 8px 56px;
+}
+
+.hour-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hour-row .hbar-track {
+  height: 8px;
+}
+
+.hour-row .hbar-label,
+.hour-row .hbar-metric,
+.hour-row .hbar-cost {
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* 每日图底部合计行:总 token 左侧、近 14 天成本合计右侧。 */
+.daily-total {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  font-size: 12px;
+}
+
+.daily-total-label {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.daily-total-metric {
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.daily-total-cost {
+  margin-left: auto;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 日历热力图(列=周,行=周一..周日)。 */
 .heatmap-wrap {
   display: flex;

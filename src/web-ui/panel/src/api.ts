@@ -73,6 +73,18 @@ export interface DayUsage {
   readonly total: number
 }
 
+/** 某个小时桶的聚合(镜像 host 侧 DashboardHourly;cost 字段由 pricing 合并)。 */
+export interface HourUsage {
+  readonly day: string
+  readonly hour: number
+  readonly recall: LabelDayUsage
+  readonly extract: LabelDayUsage
+  readonly review: LabelDayUsage
+  readonly total: number
+  readonly yuan?: number
+  readonly missingPricingRows?: number
+}
+
 /** 状态页视图模型(与 host 侧 DashboardDto 同构)。 */
 export interface Dashboard {
   readonly status: {
@@ -103,12 +115,17 @@ export interface Dashboard {
     }[]
     /** 近 84 天按日聚合(升序,零填充)。 */
     readonly daily: readonly DayUsage[]
+    /** 近 14 天 × 24 小时聚合(升序,336 桶;daily = hourly 按日求和,数学恒等)。
+     *  可选字段:旧 host 进程(未重启)不返回,面板须优雅降级(不展开、今天图空态)。 */
+    readonly hourly?: readonly HourUsage[]
     /** 近 14 天估算成本(即时计算、不落盘;缺价职责 yuan 缺省)。
      *  可选字段:旧 host 进程(未重启)不返回该字段,面板须优雅降级而不白屏。 */
     readonly costs?: {
       readonly perLabel: readonly { readonly label: string; readonly calls: number; readonly yuan?: number; readonly missingPricingRows: number }[]
       readonly totalYuan: number
       readonly incomplete: boolean
+      /** 近 14 天逐日成本(与 daily 最后 14 天对齐;价格表损坏时缺省)。 */
+      readonly daily?: readonly { readonly day: string; readonly yuan?: number; readonly missingPricingRows: number }[]
       readonly error?: string
     }
   }
