@@ -28,15 +28,15 @@ function row(id: string, createdAt: number, type: string, domain: string): strin
 }
 
 describe('aggregateEntryActivity', () => {
-  it('builds 96 buckets of 15 minutes over the last 24 hours', () => {
+  it('builds 24 buckets of 1 hour over the last 24 hours', () => {
     const now = new Date(2026, 7, 15, 12, 0, 0).getTime()
     const activity = aggregateEntryActivity(dirs, now)
     expect(activity.windowStart).toBe(now - ACTIVITY_WINDOW_MS)
     expect(activity.windowEnd).toBe(now)
-    expect(activity.bucketMinutes).toBe(15)
-    expect(activity.buckets).toHaveLength(96)
+    expect(activity.bucketMinutes).toBe(60)
+    expect(activity.buckets).toHaveLength(24)
     expect(activity.buckets[0]!.start).toBe(now - ACTIVITY_WINDOW_MS)
-    expect(activity.buckets[95]!.start).toBe(now - ACTIVITY_WINDOW_MS + 95 * ACTIVITY_BUCKET_MS)
+    expect(activity.buckets[23]!.start).toBe(now - ACTIVITY_WINDOW_MS + 23 * ACTIVITY_BUCKET_MS)
   })
 
   it('buckets entries by createdAt across dirs and key type/domain', () => {

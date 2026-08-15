@@ -112,7 +112,7 @@ export interface Dashboard {
       readonly error?: string
     }
   }
-  /** 记忆活动大表:最近 24h、15 分钟一格,counts 键 `type/domain`。 */
+  /** 记忆活动大表:最近 24h、1 小时一格,counts 键 `type/domain`。 */
   readonly activity?: {
     readonly windowStart: number
     readonly windowEnd: number

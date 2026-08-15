@@ -1,5 +1,5 @@
 /**
- * 记忆活动聚合:最近 24 小时、每 15 分钟一格,按 type × domain 计数新写入条目
+ * 记忆活动聚合:最近 24 小时、每 1 小时一格,按 type × domain 计数新写入条目
  * (纯逻辑,不 import cordis)。设计见 docs/memory-activity.md。
  *
  * 数据源是已存在的事实——全部记忆根 `.remember.jsonl` 条目的 `createdAt`——不新增
@@ -15,10 +15,10 @@ import type { MemoryEntry } from './schema.js'
 /** 缺省窗口:24 小时。 */
 export const ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000
 
-/** 缺省桶宽:15 分钟。 */
-export const ACTIVITY_BUCKET_MS = 15 * 60 * 1000
+/** 缺省桶宽:1 小时。 */
+export const ACTIVITY_BUCKET_MS = 60 * 60 * 1000
 
-/** 一个 15 分钟桶的计数(counts 键 = `type/domain`,只含非零项)。 */
+/** 一个 1 小时桶的计数(counts 键 = `type/domain`,只含非零项)。 */
 export interface ActivityBucket {
   /** 桶起始时刻(epoch 毫秒)。 */
   readonly start: number
@@ -34,7 +34,7 @@ export interface EntryActivity {
   readonly windowEnd: number
   /** 桶宽(毫秒)。 */
   readonly bucketMinutes: number
-  /** 96 个桶(升序)。 */
+  /** 24 个桶(升序)。 */
   readonly buckets: readonly ActivityBucket[]
 }
 
@@ -44,14 +44,14 @@ export function activityKey(type: MemoryEntry['type'], domain: string): string {
 }
 
 /**
- * 聚合最近 24 小时(15 分钟一格)的记忆写入活动。
+ * 聚合最近 24 小时(1 小时一格)的记忆写入活动。
  *
  * 条目按 `createdAt` 落桶:窗口 [now−24h, now),窗口外与未来时间戳忽略;
  * v1 旧条目经读即迁移回填的 createdAt 也按事实落桶。
  * @param dirs - 记忆目录列表(host 级注册表视图 + 内置层)。
  * @param now - 窗口终点(测试注入)。
  * @param windowMs - 窗口长度(测试注入;缺省 24h)。
- * @param bucketMs - 桶宽(测试注入;缺省 15min)。
+ * @param bucketMs - 桶宽(测试注入;缺省 1h)。
  * @returns 聚合结果(恒返回全部桶,零计数桶含空 counts)。
  */
 export function aggregateEntryActivity(

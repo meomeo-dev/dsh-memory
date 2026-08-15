@@ -1,5 +1,5 @@
 /**
- * 记忆活动大表(docs/memory-activity.md):最近 24 小时、15 分钟一格,X 轴时间、
+ * 记忆活动大表(docs/memory-activity.md):最近 24 小时、1 小时一格,X 轴时间、
  * Y 轴 rules/lessons × domain 组合轴(42 行),格子显示该窗口内新写入条目数。
  * 样式在 ./status.css;渲染只走 React 文本节点。
  */
@@ -43,21 +43,29 @@ function windowLabel(start: number, bucketMinutes: number): string {
   return `${p(begin.getMonth() + 1)}-${p(begin.getDate())} ${p(begin.getHours())}:${p(begin.getMinutes())}–${p(end.getHours())}:${p(end.getMinutes())}`
 }
 
-/** 记忆活动大表:96 列 × 42 行,固定格宽横向滚动,sticky 标签列,小时刻度行。 */
+/** 桶宽文案:整小时显示 `N 小时`,否则 `N 分钟`(标题与 meta 行)。 */
+function bucketLabel(bucketMinutes: number): string {
+  return bucketMinutes % 60 === 0 ? `${bucketMinutes / 60} 小时` : `${bucketMinutes} 分钟`
+}
+
+/** 记忆活动大表:42 行 × 桶数列,固定格宽横向滚动,sticky 标签列,小时刻度行(刻度跨距由 DTO 桶宽派生)。 */
 export function ActivityTable({ activity }: { readonly activity: NonNullable<Dashboard['activity']> }): JSX.Element {
   const { buckets, bucketMinutes } = activity
   const rows = DISPLAY.types.flatMap(type => DISPLAY.domains.map(domain => ({ type, domain })))
+  // 刻度跨距:每小时一 tick;桶宽不足 1 小时时多桶共用一个 tick(向下兼容旧 DTO)。
+  const cellsPerTick = Math.max(1, Math.round(60 / bucketMinutes))
+  const tickCount = Math.ceil(buckets.length / cellsPerTick)
   return (
     <section className="card">
-      <span className="section-title">记忆活动 (近 24 小时,每 15 分钟一格)</span>
+      <span className="section-title">记忆活动 (近 24 小时,每 {bucketLabel(bucketMinutes)} 一格)</span>
       <div className="activity-wrap">
         <table className="activity-table">
           <thead>
             <tr>
               <th className="activity-label" />
-              {Array.from({ length: buckets.length / 4 }, (_, i) => (
-                <th key={i} className="activity-tick" colSpan={4}>
-                  {hourOf(buckets[i * 4]!.start)}
+              {Array.from({ length: tickCount }, (_, i) => (
+                <th key={i} className="activity-tick" colSpan={cellsPerTick}>
+                  {hourOf(buckets[i * cellsPerTick]!.start)}
                 </th>
               ))}
             </tr>
@@ -85,7 +93,7 @@ export function ActivityTable({ activity }: { readonly activity: NonNullable<Das
           </tbody>
         </table>
       </div>
-      <p className="meta">格子 = 该 15 分钟窗口内新写入的记忆条目数;≤999 原值,以上按量级封顶显示(99K/M/G/B/T),精确值悬停查看。按条目 createdAt 实时聚合,不落盘。</p>
+      <p className="meta">格子 = 该 {bucketLabel(bucketMinutes)} 窗口内新写入的记忆条目数;≤999 原值,以上按量级封顶显示(99K/M/G/B/T),精确值悬停查看。按条目 createdAt 实时聚合,不落盘。</p>
     </section>
   )
 }
