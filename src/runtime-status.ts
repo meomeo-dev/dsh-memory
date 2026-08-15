@@ -28,13 +28,13 @@ export const RUNTIME_PURGE_MS = 24 * 60 * 60 * 1000
 /** 节点职责分类(与 stats.ts 的 UsageLabel 对应)。 */
 export type NodeStatusKey = 'recall' | 'extract' | 'review'
 
-/** 单个节点的运行时状态(累计 calls 在快照时由 usage 计数填充,状态机不计数)。 */
+/** 单个节点的运行时状态(状态机只管 running 与最近一次;calls 在快照时由 usage 计数填充)。 */
 export interface NodeRuntimeState {
   /** 在飞调用数(并发 fan-out 时可 >1)。 */
   running: number
   /** 最早一个在飞调用的起始时刻(epoch 毫秒);仅 running > 0 时存在。 */
   runningSince?: number
-  /** 累计调用次数(快照时取自 usage 计数)。 */
+  /** 已完成的累计调用次数(状态文件值 = usage 计数;{@link listProcesses} 返回时已加在飞数)。 */
   calls: number
   /** 最近一次完成的调用起始时刻;0 = 从未调用。 */
   lastAt: number
@@ -231,16 +231,26 @@ function readProcesses(now: number): ProcessRow[] {
   return rows
 }
 
+/** 展示语义:累计调用 = 已完成(usage 计数)+ 在飞(未完成的调用也是调用)。 */
+function withInFlight(state: NodeRuntimeState): NodeRuntimeState {
+  return { ...state, calls: state.calls + state.running }
+}
+
 /**
- * 读取全部进程的运行状态:清理超龄文件、标记失效、排序
- * (本进程 → 在线按启动时间倒序 → 已退出按最后心跳倒序)。
+ * 读取全部进程的运行状态:清理超龄文件、标记失效、把在飞调用计入累计 calls、
+ * 排序(本进程 → 在线按启动时间倒序 → 已退出按最后心跳倒序)。
  * @param now - 读取时刻(测试注入)。
  * @param currentPid - 当前进程 pid(测试注入;缺省 process.pid)。
- * @returns 进程行列表。
+ * @returns 进程行列表(calls 含在飞调用数)。
  */
 export function listProcesses(now: number = Date.now(), currentPid: number = process.pid): ProcessRow[] {
   const rows = readProcesses(now).map(row => ({
     ...row,
+    nodes: {
+      recall: withInFlight(row.nodes.recall),
+      extract: withInFlight(row.nodes.extract),
+      review: withInFlight(row.nodes.review),
+    },
     isCurrent: row.pid === currentPid,
   }))
   return rows.sort((a, b) => {

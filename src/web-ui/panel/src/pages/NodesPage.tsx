@@ -18,7 +18,7 @@ const NODE_LABELS = {
   review: 'review (质检)',
 } as const
 
-/** 一行节点状态:状态点 + 运行中指示 + 累计调用 + 最近一次(时间/耗时/错误)。 */
+/** 一行节点状态:状态点 + 名称 + 运行指示(恒显示,保证列对齐)+ 累计调用 + 最近一次。 */
 function NodeRow({ label, state, stale }: { readonly label: string; readonly state: NodeRuntimeDto; readonly stale: boolean }): JSX.Element {
   const running = state.running > 0
   const dotClass = stale ? 'idle' : running ? 'running' : 'idle'
@@ -27,7 +27,7 @@ function NodeRow({ label, state, stale }: { readonly label: string; readonly sta
     <div className="node-row">
       <span className={`node-dot ${dotClass}`} />
       <span className="node-label">{label}</span>
-      <span className={`node-running${running ? '' : ' hidden'}`}>
+      <span className={`node-running${running ? ' active' : ''}`}>
         {running && state.runningSince !== undefined
           ? `运行中 ×${state.running} · ${formatElapsed(state.runningSince)}`
           : '空闲'}
@@ -35,7 +35,7 @@ function NodeRow({ label, state, stale }: { readonly label: string; readonly sta
       <span className="node-calls mono">{state.calls.toLocaleString()} calls</span>
       <span className={`node-last${!state.lastOk ? ' error' : ''}`}>
         {never
-          ? '从未调用'
+          ? running ? '进行中…' : '从未调用'
           : state.lastOk
             ? `${formatAgo(state.lastAt)} · ${formatDuration(state.lastDurationMs)}`
             : `失败 ${formatAgo(state.lastAt)} · ${state.lastError ?? 'unknown error'}`}

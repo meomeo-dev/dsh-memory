@@ -95,6 +95,18 @@ describe('runtime status files', () => {
     expect(rows[1]!.teams).toEqual([{ root: '', nodes: 3, chars: 1200 }])
   })
 
+  it('adds in-flight calls to completed calls in listed rows (display semantics)', () => {
+    const running = status({ pid: 401, startedAt: NOW - 1000 })
+    running.nodes.recall.running = 2
+    running.nodes.recall.calls = 5
+    publishRuntime(running)
+    const [row] = listProcesses(NOW, 999)
+    expect(row).toBeDefined()
+    expect(row!.nodes.recall.calls).toBe(7) // 已完成 5 + 在飞 2
+    expect(row!.nodes.extract.calls).toBe(0)
+    expect(row!.nodes.review.calls).toBe(0)
+  })
+
   it('marks heartbeat-aged files stale (kept) and purges >24h files', () => {
     publishRuntime(status({ pid: 201, startedAt: NOW - 1000, lastSeenAt: NOW - 90_000 }))
     publishRuntime(status({ pid: 202, startedAt: NOW - RUNTIME_PURGE_MS, lastSeenAt: NOW - RUNTIME_PURGE_MS - 1 }))

@@ -63,7 +63,7 @@
   white-space: nowrap;
 }
 
-/* 节点带:状态点 | 名称 | 运行中指示 | 累计 calls | 最近一次。 */
+/* 节点带:状态点 | 名称 | 运行指示 | 累计 calls | 最近一次(5 列与 5 个子元素一一对应,不换行)。 */
 .proc-nodes {
   display: flex;
   flex-direction: column;
@@ -72,7 +72,7 @@
 
 .node-row {
   display: grid;
-  grid-template-columns: 10px 130px 1fr auto;
+  grid-template-columns: 10px 130px 1fr auto auto;
   gap: 10px;
   align-items: baseline;
   font-size: 13px;
@@ -97,12 +97,14 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* 运行指示恒显示(空闲灰 / 运行中蓝),保证三行五列严格对齐。 */
 .node-running {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-caption);
 }
 
-.node-running.hidden {
-  display: none;
+.node-running.active {
+  color: var(--dsw-static-deepseek-600);
+  font-weight: 500;
 }
 
 .node-calls {
@@ -113,6 +115,7 @@
 .node-last {
   color: var(--dsw-alias-label-tertiary);
   text-align: right;
+  white-space: nowrap;
 }
 
 .node-last.error {
@@ -124,8 +127,14 @@
     grid-template-columns: 10px 110px 1fr;
   }
 
+  /* 窄屏两行:第二行 calls 对齐名称列、最近一次对齐运行列。 */
+  .node-calls {
+    grid-column: 2;
+    text-align: left;
+  }
+
   .node-last {
     grid-column: 3;
-    text-align: left;
+    text-align: right;
   }
 }
