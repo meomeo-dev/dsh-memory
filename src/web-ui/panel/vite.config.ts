@@ -5,10 +5,33 @@
  */
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import type { Plugin } from 'vite'
+
+/**
+ * 门禁:浏览器 bundle 里任何残留的 `process.env` 都会在运行时抛
+ * ReferenceError(React CJS 产物曾因此整页空白)。Vite 5 不再默认替换依赖里的
+ * process.env.NODE_ENV,故显式 define;本插件在产物落盘前断言替换已生效。
+ */
+const assertNoProcessEnv = (): Plugin => ({
+  name: 'assert-no-process-env',
+  generateBundle(_options, bundle) {
+    for (const output of Object.values(bundle)) {
+      if (output.type !== 'chunk') continue
+      if (output.code.includes('process.env')) {
+        throw new Error('panel bundle contains unreplaced process.env — browser bundle would crash at load')
+      }
+    }
+  },
+})
 
 export default defineConfig({
   root: new URL('.', import.meta.url).pathname,
-  plugins: [react()],
+  plugins: [react(), assertNoProcessEnv()],
+  define: {
+    // React 走 CJS 产物(包 main 是 CJS);Vite 5 对依赖不做默认替换,须显式 define,
+    // 否则 process.env.NODE_ENV 原样进 bundle,浏览器读 process 直接 ReferenceError。
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
   build: {
     // 相对 root(src/web-ui/panel)上溯三级到包根,再落 panel/dist。
     outDir: '../../../panel/dist',

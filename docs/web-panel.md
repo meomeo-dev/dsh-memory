@@ -54,6 +54,7 @@ src/index.ts               接线:registerPanel(webServer + connection 存在时
 
 - 样式令牌按值镜像 dsh 设计系统(`@deepseek-ai/dsh-client-ui-theme` 的 `--dsw-static-*` / `--dsw-alias-*` light 主题与 `base.css` 字体栈/缓动曲线);面板是独立页不加载 dsh SPA 样式表,镜像以注释标明来源,漂移只影响视觉。
 - 构建:`pnpm build` = gen:schema → tsc → `panel:build`(vite,产物落包根 `panel/dist/`,随 npm files 发布)。`prepare` 与 `build` 同链(含 `panel:build`)——git/github 形式安装依赖 prepare 产出 panel 产物;`panel:build` 的 `emptyOutDir` 负责清理旧产物。
+- vite 显式 `define: { 'process.env.NODE_ENV': 'production' }`:React 走 CJS 产物、Vite 5 对依赖不做默认替换,缺它 bundle 里残留 `process.env.NODE_ENV`,浏览器加载即 `ReferenceError: process is not defined`(整页空白);`assertNoProcessEnv` 插件在产物落盘前断言替换已生效。
 - host 侧 `findPanelDist()` 在「lib 运行」与「源码运行」两处相对位置上探测产物目录,均不存在时跳过面板注册并告警(`run pnpm panel:build`)。
 - 面板构建产物不进 git(`.gitignore` 排除),但必须进 npm tarball——`.npmignore` 置空覆盖该排除。
 
