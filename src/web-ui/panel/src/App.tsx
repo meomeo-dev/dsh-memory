@@ -288,7 +288,7 @@ function Donut({ segments }: { readonly segments: readonly { readonly label: str
   )
 }
 
-/** 水平堆叠条:每个职责分类的输入 / 输出 / 缓存读 token。 */
+/** 水平堆叠条:每个职责分类的输入 / 输出 / 缓存读 token(组/类 → 条 → 指标,图例在下)。 */
 function StackedBars({ rows }: { readonly rows: Dashboard['usage']['counters'] }): JSX.Element {
   const maxTotal = Math.max(1, ...rows.map(row => row.inputTokens + row.outputTokens + row.cacheReadTokens))
   const width = (value: number): string => `${(value / maxTotal) * 100}%`
@@ -302,7 +302,7 @@ function StackedBars({ rows }: { readonly rows: Dashboard['usage']['counters'] }
             <span className="bar-seg" style={{ width: width(row.outputTokens), background: CHART_COLORS.output }} title={`output ${row.outputTokens.toLocaleString()}`} />
             <span className="bar-seg" style={{ width: width(row.cacheReadTokens), background: CHART_COLORS.cache }} title={`cacheRead ${row.cacheReadTokens.toLocaleString()}`} />
           </div>
-          <span className="bar-total">
+          <span className="bar-metric">
             {formatCompact(row.inputTokens + row.outputTokens + row.cacheReadTokens)} tok · {row.calls} calls
           </span>
         </div>
@@ -319,7 +319,7 @@ function StackedBars({ rows }: { readonly rows: Dashboard['usage']['counters'] }
   )
 }
 
-/** 水平对比条:静态上下文成本(预热 team vs system prompt 摘要)。 */
+/** 水平对比条:静态上下文成本(预热 team vs system prompt 摘要;组/类 → 条 → 指标)。 */
 function StaticBars({ usage }: { readonly usage: Dashboard['usage'] }): JSX.Element {
   const max = Math.max(1, usage.warmTeams.tokens, usage.summary.tokens)
   const width = (value: number): string => `${(value / max) * 100}%`
@@ -335,7 +335,7 @@ function StaticBars({ usage }: { readonly usage: Dashboard['usage'] }): JSX.Elem
           <div className="bar-track">
             <span className="bar-seg" style={{ width: width(row.tokens), background: row.color }} />
           </div>
-          <span className="bar-total">{formatCompact(row.tokens)} tok est. · {formatBytes(row.chars)}</span>
+          <span className="bar-metric">{formatCompact(row.tokens)} tok est. · {formatBytes(row.chars)}</span>
         </div>
       ))}
     </div>
