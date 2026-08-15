@@ -106,14 +106,19 @@
   gap: 14px;
 }
 
-/* 记忆活动大表(近 24h × 15min):固定格宽横向滚动 + sticky 标签列 + 小时刻度行。 */
+/* 记忆活动大表(近 24h × 1h):格宽自适应撑满卡片 + 窄设备横向滚动 + sticky 标签列。 */
 .activity-wrap {
   overflow-x: auto;
   max-width: 100%;
 }
 
 .activity-table {
-  width: max-content;
+  /* fixed 布局 + 100% 宽:24 数据列均分卡片剩余宽度,桌面撑满卡片
+     (此前 max-content 固定 24px/格,宽屏在右侧留大片空白);
+     min-width 保底「176px 标签列 + 24px×24 格」——窄设备仍横向滚动,自适应行为不变。 */
+  table-layout: fixed;
+  width: 100%;
+  min-width: 752px;
   border-collapse: collapse;
 }
 
@@ -141,21 +146,17 @@
   font-weight: 500;
   color: var(--dsw-alias-label-secondary);
   padding: 1px 8px 1px 0 !important;
-  /* 宽随内容伸缩:128px 下限、176px 上限;超限裁剪 + ellipsis(悬停 title 全名),
-     文字永不绘制越界(.mono 12px 等宽下最长域 r/ContractConstants ≈ 145px;
-     上限兜住字体回退变宽)。 */
-  width: max-content;
-  min-width: 128px;
-  max-width: 176px;
+  /* fixed 布局按首行(thead)定列宽:176px 完整容纳最长域 r/ContractConstants
+     (.mono 12px 等宽下 ≈ 153px);超限裁剪 + ellipsis(悬停 title 全名),
+     文字永不绘制越界。 */
+  width: 176px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .activity-cell {
-  /* 固定格宽(非自适应):全部时间列必须统一对齐时间轴;24px 给 3 字符 9px 等宽留足余量
-     (实测 SF Mono 3 字符 ≈ 16px,留 ~8px 防字体回退变宽时静默裁剪)。 */
-  min-width: 24px;
-  max-width: 24px;
+  /* 格宽由 fixed 布局均分(桌面自适应撑满卡片);24px/格保底由表格 min-width 承担
+     (3 字符 9px 等宽 ≈ 16px,留 ~8px 防字体回退变宽时静默裁剪)。 */
   height: 18px;
   font-family: var(--ds-font-family-code);
   font-size: 9px;
