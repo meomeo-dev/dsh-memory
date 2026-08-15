@@ -76,7 +76,7 @@ import {
 import type { ExtractFn, TranscriptMessage } from './extract.js'
 import { computeStats, computeStatsIn, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.js'
 import type { UsageCounter } from './stats.js'
-import { aggregateByDay, appendUsageRow, readUsageRows } from './usage-log.js'
+import { aggregateByDay, aggregateWindowTotals, appendUsageRow, readUsageRows } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
 import {
   RUNTIME_HEARTBEAT_MS,
@@ -744,7 +744,10 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
         }
         // 摘要体积是本进程的会话产物(按进程启动目录),不随 host 统计走注册表。
         const summaryChars = renderSummary(discoverEntries(process.cwd())).length
-        const labels: readonly UsageLabel[] = ['recall', 'extract', 'review']
+        // 消耗口径(docs/status-page-usage.md):totals 与 daily 同源 usage.jsonl——
+        // totals 是近 14 天窗口聚合(甜甜圈/堆叠条/明细表),daily 是 84 天日聚合
+        // (每日图/热力图);warmTeams/summary 是本进程实时装载,标题已标注范围。
+        const usageRows = readUsageRows()
         return {
           status: {
             maxNodeKb: runtime.config.maxNodeKb,
@@ -766,11 +769,8 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
           usage: {
             warmTeams: { nodes: nodeCount, chars: nodeChars, tokens: estimateTokens(nodeChars) },
             summary: { chars: summaryChars, tokens: estimateTokens(summaryChars) },
-            counters: labels.map(label => {
-              const counter = runtime.usage.get(label) ?? EMPTY_USAGE
-              return { label, ...counter }
-            }),
-            daily: aggregateByDay(readUsageRows(), 84),
+            totals: aggregateWindowTotals(usageRows, 14).map(({ label, calls, inputTokens, outputTokens, cacheReadTokens }) => ({ label, calls, inputTokens, outputTokens, cacheReadTokens })),
+            daily: aggregateByDay(usageRows, 84),
           },
         }
       },

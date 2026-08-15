@@ -366,14 +366,14 @@ export interface DashboardDto {
     /** catalog 条目总数。 */
     readonly catalogEntries: number
   }
-  /** 正文:token 用量(静态上下文估算 + 动态 LLM 调用消耗 + 每日聚合)。 */
+  /** 正文:token 用量(静态上下文估算 + 持久化 LLM 调用消耗 + 每日聚合)。 */
   readonly usage: {
-    /** 预热 team 的静态上下文成本。 */
+    /** 预热 team 的静态上下文成本(本进程实时装载)。 */
     readonly warmTeams: { readonly nodes: number; readonly chars: number; readonly tokens: number }
-    /** system prompt 摘要的静态上下文成本。 */
+    /** system prompt 摘要的静态上下文成本(本进程实时装载)。 */
     readonly summary: { readonly chars: number; readonly tokens: number }
-    /** 本进程 LLM 调用消耗(按职责分类)。 */
-    readonly counters: readonly DashboardUsageRow[]
+    /** 近 14 天 LLM 调用消耗(usage.jsonl,host 级跨进程;与 daily 同源,见 docs/status-page-usage.md)。 */
+    readonly totals: readonly DashboardUsageRow[]
     /** 近 84 天按日聚合(usage.jsonl,零填充,升序;柱状图取后 14 天,热力图用全部)。 */
     readonly daily: readonly DashboardDaily[]
   }

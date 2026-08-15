@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { aggregateByDay, appendUsageRow, localDay, readUsageRows, recentDays, usageLogPath } from '../src/usage-log.js'
+import { aggregateByDay, aggregateWindowTotals, appendUsageRow, localDay, readUsageRows, recentDays, usageLogPath } from '../src/usage-log.js'
 import type { UsageLogRow } from '../src/usage-log.js'
 
 let dshHome: string
@@ -89,5 +89,49 @@ describe('aggregateByDay', () => {
     const old = new Date(2026, 7, 1, 9, 0, 0).getTime()
     const daily = aggregateByDay([row(old)], 3, now)
     expect(daily.reduce((sum, day) => sum + day.total, 0)).toBe(0)
+  })
+})
+
+describe('aggregateWindowTotals', () => {
+  const now = new Date(2026, 7, 14, 12, 0, 0).getTime()
+  const d0 = new Date(2026, 7, 14, 9, 0, 0).getTime()
+  const d1 = new Date(2026, 7, 13, 9, 0, 0).getTime()
+  const rows = [
+    row(d0),
+    row(d0, { label: 'review', inputTokens: 8, outputTokens: 4, cacheReadTokens: 0 }),
+    row(d1, { label: 'extract', inputTokens: 20, outputTokens: 10, cacheReadTokens: 5 }),
+  ]
+
+  it('aggregates per label over the window, identical to summing daily buckets', () => {
+    const totals = aggregateWindowTotals(rows, 3, now)
+    expect(totals.map(total => total.label)).toEqual(['recall', 'extract', 'review'])
+
+    const recall = totals[0]!
+    expect(recall.calls).toBe(1)
+    expect(recall.inputTokens).toBe(100)
+    expect(recall.totalTokens).toBe(175)
+    const extract = totals[1]!
+    expect(extract.calls).toBe(1)
+    expect(extract.totalTokens).toBe(35)
+    const review = totals[2]!
+    expect(review.calls).toBe(1)
+    expect(review.totalTokens).toBe(12)
+
+    // 对账恒等:窗口合计 = 每日聚合求和(状态页甜甜圈合计与每日柱合计的对账基础)。
+    const daily = aggregateByDay(rows, 3, now)
+    for (const total of totals) {
+      const fromDaily = daily.reduce((sum, day) => sum + day[total.label].totalTokens, 0)
+      expect(total.totalTokens).toBe(fromDaily)
+    }
+    expect(totals.reduce((sum, total) => sum + total.totalTokens, 0)).toBe(175 + 35 + 12)
+  })
+
+  it('returns zero totals for an empty window', () => {
+    const totals = aggregateWindowTotals([], 14, now)
+    expect(totals).toHaveLength(3)
+    for (const total of totals) {
+      expect(total.calls).toBe(0)
+      expect(total.totalTokens).toBe(0)
+    }
   })
 })

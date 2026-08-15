@@ -165,3 +165,49 @@ export function aggregateByDay(rows: readonly UsageLogRow[], days: number, now: 
   }
   return daysList.map(day => byDay.get(day)!)
 }
+
+/** 某职责在时间窗内的聚合(与 {@link aggregateByDay} 同窗、同口径)。 */
+export interface WindowTotals {
+  /** 职责分类。 */
+  readonly label: UsageLabel
+  /** 窗口内调用次数(日志行数)。 */
+  readonly calls: number
+  /** 窗口内输入 token 合计。 */
+  readonly inputTokens: number
+  /** 窗口内输出 token 合计。 */
+  readonly outputTokens: number
+  /** 窗口内缓存读 token 合计。 */
+  readonly cacheReadTokens: number
+  /** 窗口内该职责 token 合计(input + output + cacheRead)。 */
+  readonly totalTokens: number
+}
+
+/**
+ * 按职责聚合近 `days` 天的调用消耗(近 14 天窗口的甜甜圈 / 堆叠条 / 明细表用)。
+ *
+ * 由 {@link aggregateByDay} 的同窗日聚合求和而来——与每日图**数学恒等**
+ * (零填充日求和 = 真实行求和),保证「甜甜圈合计 = 每日柱合计」可对账。
+ * @param rows - 日志行(由 {@link readUsageRows} 读取)。
+ * @param days - 窗口天数(1..90;越界由调用方约束)。
+ * @param now - 参照时刻(测试注入)。
+ * @returns 三职责的窗口聚合(顺序 recall / extract / review)。
+ */
+export function aggregateWindowTotals(rows: readonly UsageLogRow[], days: number, now: number = Date.now()): WindowTotals[] {
+  const daily = aggregateByDay(rows, days, now)
+  const labels = ['recall', 'extract', 'review'] as const
+  return labels.map((label) => {
+    let calls = 0
+    let inputTokens = 0
+    let outputTokens = 0
+    let cacheReadTokens = 0
+    let totalTokens = 0
+    for (const day of daily) {
+      calls += day[label].calls
+      inputTokens += day[label].inputTokens
+      outputTokens += day[label].outputTokens
+      cacheReadTokens += day[label].cacheReadTokens
+      totalTokens += day[label].totalTokens
+    }
+    return { label, calls, inputTokens, outputTokens, cacheReadTokens, totalTokens }
+  })
+}

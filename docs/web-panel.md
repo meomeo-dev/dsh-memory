@@ -60,7 +60,7 @@ RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload
 ## 页面
 
 - **记忆页**:顶部筛选组件(全文搜索 entry/scope/domain + type/domain/layer 下拉 + 计数),正文区 Timeline / Table 两种布局切换。Timeline 按创建日期分组(降序),卡片含 type/domain/layer 徽标、条目文本、scope/file/entryPoint/references 溯源;Table 平铺全部 10 列。
-- **状态页**:三区结构——顶部 team 状态(各 root 的已预热节点数 + maxNodeKb chip)、中部统计指标块(总条目 / rules / lessons / 各层 / 领域数 / 文件 / jsonl 与 md 体积 / catalog,网格卡片)、正文 usage 图表。图表为纯 SVG/div(零外部图表库,满足 CSP `default-src 'none'`):三张小图并列(token 分布甜甜圈、LLM 调用消耗堆叠条、静态上下文成本对比条),近 14 天每日用量(紧凑水平条形图:日期 | 三段条 | 总 token)与近 12 周日历热力图(5 档强度,deepseek 蓝)各占一整行;下方附用量明细表。带「刷新」按钮重取 `dashboard-get`。
+- **状态页**:三区结构——顶部 team 状态(本进程,各 root 的已预热节点数 + maxNodeKb chip)、中部统计指标块(host 级注册表视图:总条目 / rules / lessons / 各层 / 领域数 / 文件 / jsonl 与 md 体积 / catalog,网格卡片)、正文 usage 图表。用量口径统一见 docs/status-page-usage.md:消耗类图表(Token 分布、LLM 调用消耗、用量明细)读 usage.jsonl 按「近 14 天」聚合(host 级、跨进程、跨重启),每日用量柱与日历热力图读同源 84 天日聚合,静态上下文成本标注「本进程」实时装载——甜甜圈合计与每日柱合计数学恒等。图表为纯 SVG/div(零外部图表库,满足 CSP `default-src 'none'`);带「刷新」按钮重取 `dashboard-get`。
 - **目录页**:展示已登记记忆根及其状态。用户故事:① 一眼看全机记忆根分布(位置/条目/文件/最近活跃);② 展开看文件级明细;③ 手动登记备份拷回的根;④ 移除登记(不动磁盘);⑤ 一键导出全部或单根记忆包。信息结构:页头(标题 + 导出全部)→ 汇总指标(根数/总条目/总文件)→ 登记表单(路径 + 校验)→ 根列表卡片(kind 徽标 / 路径 / 存活状态点 / 条目文件计数 / 首登与最近可见 / 导出·移除登记·文件明细操作)。
 - **节点状态页**:跨进程总览(设计见 docs/node-status.md)。用户故事:多会话并跑时定位卡住/报错的节点、看各进程装载与最近调用健康度、识别崩溃残留。信息结构:进程卡片列表(本进程置顶高亮;已退出沉底置灰),每卡三段——身份带(pid · port · 启动时间 · cwd)、装载带(每 root 预热 team 节点数/体积 + 摘要体积)、节点带(recall/extract/review 三行:状态点 + 运行中指示 + 累计 calls + 最近一次时间/耗时/错误)。5s 自动轮询 + 手动刷新。
 - **设置页**:13 个配置键的表单,按 kind 出控件(number / boolean / enum / string / textarea),统一「保存」提交 config-set,成功/失败横幅反馈。键集合与展示元数据在 `src/web-ui/ui.ts` 的 `PANEL_CONFIG_META`(测试锁定与 `CONFIG_KEYS` 不漂移)。

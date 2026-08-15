@@ -256,7 +256,7 @@ describe('handlePanelRpc', () => {
           usage: {
             warmTeams: { nodes: 3, chars: 1200, tokens: 300 },
             summary: { chars: 400, tokens: 100 },
-            counters: [{ label: 'recall', calls: 2, inputTokens: 100, outputTokens: 50, cacheReadTokens: 25 }],
+            totals: [{ label: 'recall', calls: 2, inputTokens: 100, outputTokens: 50, cacheReadTokens: 25 }],
             daily: [{ day: '2026-08-14', recall: { calls: 1, inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, totalTokens: 17 }, extract: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0 }, review: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0 }, total: 17 }],
           },
         }
@@ -266,10 +266,10 @@ describe('handlePanelRpc', () => {
     expect(result.ok).toBe(true)
     expect(called).toBe(true)
     if (result.ok) {
-      const value = result.value as { dashboard: { status: { teams: unknown[] }; stats: { total: number }; usage: { counters: unknown[]; daily: unknown[] } } }
+      const value = result.value as { dashboard: { status: { teams: unknown[] }; stats: { total: number }; usage: { totals: unknown[]; daily: unknown[] } } }
       expect(value.dashboard.status.teams).toHaveLength(1)
       expect(value.dashboard.stats.total).toBe(2)
-      expect(value.dashboard.usage.counters).toHaveLength(1)
+      expect(value.dashboard.usage.totals).toHaveLength(1)
       expect(value.dashboard.usage.daily).toHaveLength(1)
     }
   })

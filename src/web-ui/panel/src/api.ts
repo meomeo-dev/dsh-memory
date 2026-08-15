@@ -93,7 +93,8 @@ export interface Dashboard {
   readonly usage: {
     readonly warmTeams: { readonly nodes: number; readonly chars: number; readonly tokens: number }
     readonly summary: { readonly chars: number; readonly tokens: number }
-    readonly counters: readonly {
+    /** 近 14 天按职责聚合(host 级持久;与 daily 同源)。 */
+    readonly totals: readonly {
       readonly label: string
       readonly calls: number
       readonly inputTokens: number

@@ -44,12 +44,12 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
     { label: 'md 体积', value: formatBytes(stats.mdBytes) },
     { label: 'catalog 条目', value: stats.catalogEntries.toLocaleString() },
   ]
-  const tokenSegments = usage.counters.map(counter => ({
+  const tokenSegments = usage.totals.map(counter => ({
     label: counter.label,
     value: counter.inputTokens + counter.outputTokens + counter.cacheReadTokens,
     color: CHART_COLORS[counter.label as 'recall' | 'extract' | 'review'] ?? CHART_COLORS.recall,
   }))
-  const totalCalls = usage.counters.reduce((sum, counter) => sum + counter.calls, 0)
+  const totalCalls = usage.totals.reduce((sum, counter) => sum + counter.calls, 0)
 
   return (
     <div className="page">
@@ -59,10 +59,10 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
       </div>
       {error !== undefined && <div className="banner error">刷新失败: {error}</div>}
 
-      {/* 顶部:team 状态 */}
+      {/* 顶部:team 状态(本进程)。 */}
       <section className="card status-card">
         <header>
-          <span className="section-title">Team 状态</span>
+          <span className="section-title">Team 状态(本进程)</span>
           <span className="chip">maxNodeKb = {status.maxNodeKb}</span>
         </header>
         {status.teams.length === 0
@@ -85,39 +85,40 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
         ))}
       </section>
 
-      {/* 正文:usage 图表 —— 三张小图并列,两张整行大图各占一行。 */}
+      {/* 正文:usage 图表 —— 消耗类图表与每日图同源 usage.jsonl(近 14 天,host 级
+          跨进程/跨重启);静态上下文成本是本进程实时装载(docs/status-page-usage.md)。 */}
       <section className="charts">
         <div className="card chart-card">
-          <span className="section-title">Token 分布(按职责)</span>
+          <span className="section-title">Token 分布(按职责,近 14 天)</span>
           {totalCalls === 0
-            ? <p className="meta">本进程尚无 LLM 调用 (recall / extract / review)。</p>
+            ? <p className="meta">近 14 天尚无 LLM 调用 (recall / extract / review)。</p>
             : <Donut segments={tokenSegments} />}
         </div>
         <div className="card chart-card">
-          <span className="section-title">LLM 调用消耗(输入 / 输出 / 缓存读)</span>
+          <span className="section-title">LLM 调用消耗(输入 / 输出 / 缓存读,近 14 天)</span>
           {totalCalls === 0
-            ? <p className="meta">本进程尚无 LLM 调用。</p>
-            : <StackedBars rows={usage.counters} />}
+            ? <p className="meta">近 14 天尚无 LLM 调用。</p>
+            : <StackedBars rows={usage.totals} />}
         </div>
         <div className="card chart-card">
-          <span className="section-title">静态上下文成本估算</span>
+          <span className="section-title">静态上下文成本估算(本进程)</span>
           <StaticBars usage={usage} />
         </div>
       </section>
       <section className="charts-wide">
         <div className="card chart-card">
-          <span className="section-title">近 14 天每日用量</span>
+          <span className="section-title">近 14 天每日用量(host 级持久)</span>
           <DailyBars daily={usage.daily} />
         </div>
         <div className="card chart-card">
-          <span className="section-title">近 12 周日历热力图</span>
+          <span className="section-title">近 12 周日历热力图(host 级持久)</span>
           <CalendarHeatmap daily={usage.daily} />
         </div>
       </section>
 
-      {/* usage 明细表 */}
+      {/* usage 明细表(近 14 天窗口,与上方消耗图同源)。 */}
       <section className="card">
-        <span className="section-title">用量明细 (Usage)</span>
+        <span className="section-title">用量明细 (Usage, 近 14 天)</span>
         <div className="table-wrap">
           <table>
             <thead>
@@ -131,7 +132,7 @@ export function StatusPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JS
               </tr>
             </thead>
             <tbody>
-              {usage.counters.map(counter => (
+              {usage.totals.map(counter => (
                 <tr key={counter.label}>
                   <td>{counter.label}</td>
                   <td className="mono">{counter.calls.toLocaleString()}</td>

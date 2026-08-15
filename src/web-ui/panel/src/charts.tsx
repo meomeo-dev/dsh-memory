@@ -59,7 +59,7 @@ export function Donut({ segments }: { readonly segments: readonly { readonly lab
 }
 
 /** 水平堆叠条:每个职责分类的输入 / 输出 / 缓存读 token(组/类 → 条 → 指标,图例在下)。 */
-export function StackedBars({ rows }: { readonly rows: Dashboard['usage']['counters'] }): JSX.Element {
+export function StackedBars({ rows }: { readonly rows: Dashboard['usage']['totals'] }): JSX.Element {
   const maxTotal = Math.max(1, ...rows.map(row => row.inputTokens + row.outputTokens + row.cacheReadTokens))
   const width = (value: number): string => `${(value / maxTotal) * 100}%`
   return (
