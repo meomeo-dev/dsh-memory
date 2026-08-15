@@ -12,6 +12,7 @@
   "files": [
     "lib",
     "panel/dist",
+    "lmemory",
     "cordis.patch.yml"
   ],
   "publishConfig": {

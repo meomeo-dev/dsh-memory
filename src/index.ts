@@ -1376,6 +1376,11 @@ export function apply(ctx: Context): void {
     refreshRegistry(agent.session.header.cwd)
   })
 
+  // 价格表:启动即种子(与 registry 同节奏,不依赖首次面板/命令访问);损坏不阻断启动,
+  // 成本展示会显式报「价格表不可用」,用户修表即恢复(docs/pricing-and-cost.md)。
+  const pricingSeed = loadPricing()
+  if (!pricingSeed.ok) ctx.logger.warn(`dsh-memory: pricing table unavailable: ${pricingSeed.error}`)
+
   // order 10:persona(0)之后、工具指导(100–199)之前,注入已知记忆摘要。
   ctx.systemPrompt.section({
     name: 'memory:summary',
