@@ -10,7 +10,7 @@
  *   - `append` / `update` / `remove`(按 id)/ `removeByEntry`(按 entry 文本,供 forget)/
  *     `find` / `rebuild`。
  *   - 旧数据迁移:读取时发现缺失 `id` 的旧行,惰性补一个 id 并落盘(id 一生不变)。
- *   - `catalog.json`:每层 `memory/` 目录一个派生索引(记忆 id → 所在文件),全量重写、
+ *   - `catalog.json`:每层 `lmemory/` 目录一个派生索引(记忆 id → 所在文件),全量重写、
  *     可重建;真相源仍是 `.remember.jsonl`,不一致时以 jsonl 为准。
  *
  * @module dsh-memory/store
@@ -33,7 +33,7 @@ const CATALOG_VERSION = 1
 export interface CatalogEntry {
   /** 记忆唯一编号。 */
   readonly id: MemoryId
-  /** 相对本层 `memory/` 目录的 `.remember.jsonl` 路径。 */
+  /** 相对本层 `lmemory/` 目录的 `.remember.jsonl` 路径。 */
   readonly file: string
   /** 记忆类型。 */
   readonly type: MemoryType
@@ -99,7 +99,7 @@ export interface FindQuery {
 export interface FoundEntry {
   /** 完整记忆条目。 */
   readonly entry: MemoryEntry
-  /** 相对所在 `memory/` 目录的 `.remember.jsonl` 路径。 */
+  /** 相对所在 `lmemory/` 目录的 `.remember.jsonl` 路径。 */
   readonly file: string
 }
 

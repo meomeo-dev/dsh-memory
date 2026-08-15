@@ -98,7 +98,7 @@ describe('append', () => {
 
   it('routes project-layer entries to the project write root', () => {
     const result = append(project, candidate({ layer: 'project' }))
-    expect(result.jsonlPath).toContain(join(project, '.dsh', 'memory'))
+    expect(result.jsonlPath).toContain(join(project, '.dsh', 'lmemory'))
     expect(readCatalog(memoryWriteRoots(project).project)!.entries).toHaveLength(1)
   })
 

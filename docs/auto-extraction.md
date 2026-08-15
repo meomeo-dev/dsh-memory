@@ -288,7 +288,7 @@ dsh 的 session 暴露 `deriveMessages(): Message[]`(`packages/core/session/src/
 
 **抽取器路径**:`layer` 与 `scope` 分开确定:
 
-- **`layer` 由会话推导**:记忆写到「会话所在的目录」。项目会话(cwd 经 `.git` 向上探测到项目根,与 team 预热 project-root 探测同源)→ `<repo>/.dsh/memory/`,layer = `project`;无项目 → `~/.dsh/memory/`,layer = `user`。global 层几乎不用(concept.md §8)。
+- **`layer` 由会话推导**:记忆写到「会话所在的目录」。项目会话(cwd 经 `.git` 向上探测到项目根,与 team 预热 project-root 探测同源)→ `<repo>/.dsh/lmemory/`,layer = `project`;无项目 → `~/.dsh/lmemory/`,layer = `user`。global 层几乎不用(concept.md §8)。
 - **`scope` 由抽取器判断**:判断「这条记忆影响哪个子系统 / 模块」,输出自由文本(如「全项目」「Web UI」)。它不是三层枚举,是与 domain 正交的影响范围。
 
 其余(校验 / 去重 / id / catalog)完全共享 store,与工具路径一致。

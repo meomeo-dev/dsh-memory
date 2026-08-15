@@ -34,7 +34,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
 import { renderSummary } from './render.js'
-import { discoverEntries, resolveRecalled } from './memory-file.js'
+import { discoverEntries, migrateLegacyMemoryDirs, resolveRecalled } from './memory-file.js'
 import type { RecalledEntry } from './memory-file.js'
 import { append, find, rebuild, remove, removeByEntry, update } from './store.js'
 import { recall as recallTeam } from './team.js'
@@ -1073,6 +1073,11 @@ function registerTools(ctx: Context, runtime: Runtime): void {
  */
 export function apply(ctx: Context): void {
   const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG }, annealing: new Map(), usage: new Map() }
+
+  // 旧目录一次性迁移(用户两层):先于一切发现/写盘执行;项目层由发现路径惰性迁移。
+  const migration = migrateLegacyMemoryDirs()
+  for (const moved of migration.moved) ctx.logger.info(`dsh-memory: migrated legacy memory dir ${moved} -> lmemory/`)
+  for (const skipped of migration.skipped) ctx.logger.warn(`dsh-memory: ${skipped} does not look like a memory dir; leaving it untouched`)
 
   // order 10:persona(0)之后、工具指导(100–199)之前,注入已知记忆摘要。
   ctx.systemPrompt.section({

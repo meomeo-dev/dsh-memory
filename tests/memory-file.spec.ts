@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { discoverEntries, memoryWriteRoots, resolveRecalled, visibleMemoryDirs } from '../src/memory-file.js'
+import { discoverEntries, memoryWriteRoots, migrateLegacyMemoryDirs, resolveRecalled, visibleMemoryDirs } from '../src/memory-file.js'
 import { isMemoryId } from '../src/schema.js'
 
 let dshHome: string
@@ -31,8 +31,8 @@ afterEach(() => {
 describe('memoryWriteRoots', () => {
   it('routes user and project to their write roots', () => {
     const roots = memoryWriteRoots(project)
-    expect(roots.user).toBe(join(dshHome, 'memory'))
-    expect(roots.project).toBe(join(project, '.dsh', 'memory'))
+    expect(roots.user).toBe(join(dshHome, 'lmemory'))
+    expect(roots.project).toBe(join(project, '.dsh', 'lmemory'))
   })
 })
 
@@ -40,19 +40,19 @@ describe('visibleMemoryDirs', () => {
   it('lists user-level dirs without a cwd and adds project dirs with one', () => {
     const withoutProject = visibleMemoryDirs()
     expect(withoutProject).toHaveLength(3)
-    expect(withoutProject[1]).toBe(join(agentsHome, 'memory'))
-    expect(withoutProject[2]).toBe(join(dshHome, 'memory'))
+    expect(withoutProject[1]).toBe(join(agentsHome, 'lmemory'))
+    expect(withoutProject[2]).toBe(join(dshHome, 'lmemory'))
 
     const withProject = visibleMemoryDirs(project)
     expect(withProject).toHaveLength(5)
-    expect(withProject[3]).toBe(join(project, '.agents', 'memory'))
-    expect(withProject[4]).toBe(join(project, '.dsh', 'memory'))
+    expect(withProject[3]).toBe(join(project, '.agents', 'lmemory'))
+    expect(withProject[4]).toBe(join(project, '.dsh', 'lmemory'))
   })
 })
 
 describe('discoverEntries (migrating read of legacy rows)', () => {
   it('migrates a jsonl row without an id and keeps its id stable across reads', () => {
-    const dir = join(dshHome, 'memory')
+    const dir = join(dshHome, 'lmemory')
     mkdirSync(dir, { recursive: true })
     writeFileSync(
       join(dir, '2026-08-13.rules.remember.jsonl'),
@@ -74,7 +74,7 @@ describe('discoverEntries (migrating read of legacy rows)', () => {
 
 describe('resolveRecalled', () => {
   function seed(entry: string, entryPoint = '-', references = '-'): void {
-    const dir = join(project, '.dsh', 'memory')
+    const dir = join(project, '.dsh', 'lmemory')
     mkdirSync(dir, { recursive: true })
     writeFileSync(
       join(dir, '2026-08-14.lessons.remember.jsonl'),
@@ -123,7 +123,7 @@ describe('resolveRecalled', () => {
   })
 
   it('preserves input order and resolves duplicates by id into distinct entries', () => {
-    const dir = join(project, '.dsh', 'memory')
+    const dir = join(project, '.dsh', 'lmemory')
     mkdirSync(dir, { recursive: true })
     const row = (id: string, entry: string) => `${JSON.stringify({ id, schemaVersion: 2, createdAt: 1750000000000, type: 'rules', domain: 'Style', scope: '全项目', layer: 'project', entry, entryPoint: '-', references: '-' })}\n`
     writeFileSync(
@@ -139,10 +139,78 @@ describe('resolveRecalled', () => {
   })
 })
 
+describe('legacy memory/ dir migration (one-time rename to lmemory/)', () => {
+  const row = '{"type":"rules","domain":"Style","scope":"全项目","layer":"user","entry":"旧目录条目","entryPoint":"-","references":"-"}\n'
+
+  it('renames a legacy user memory dir with data intact, idempotently', () => {
+    const legacy = join(dshHome, 'memory')
+    mkdirSync(legacy, { recursive: true })
+    writeFileSync(join(legacy, '2026-08-13.rules.remember.jsonl'), row, 'utf8')
+
+    const report = migrateLegacyMemoryDirs()
+    expect(report.moved).toEqual([legacy])
+    expect(report.skipped).toEqual([])
+    expect(existsSync(legacy)).toBe(false)
+    expect(readFileSync(join(dshHome, 'lmemory', '2026-08-13.rules.remember.jsonl'), 'utf8')).toBe(row)
+
+    // 幂等:第二次无迁移发生。
+    const again = migrateLegacyMemoryDirs()
+    expect(again.moved).toEqual([])
+    expect(again.skipped).toEqual([])
+  })
+
+  it('skips a non-empty legacy dir that does not contain memory artifacts', () => {
+    const legacy = join(dshHome, 'memory')
+    mkdirSync(legacy, { recursive: true })
+    writeFileSync(join(legacy, 'other-tool.db'), 'x', 'utf8')
+
+    const report = migrateLegacyMemoryDirs()
+    expect(report.moved).toEqual([])
+    expect(report.skipped).toEqual([legacy])
+    expect(existsSync(legacy)).toBe(true)
+  })
+
+  it('leaves the legacy dir untouched when the new dir already exists', () => {
+    mkdirSync(join(dshHome, 'memory'), { recursive: true })
+    writeFileSync(join(dshHome, 'memory', 'old.jsonl'), row, 'utf8')
+    mkdirSync(join(dshHome, 'lmemory'), { recursive: true })
+    writeFileSync(join(dshHome, 'lmemory', 'new.jsonl'), row, 'utf8')
+
+    const report = migrateLegacyMemoryDirs()
+    expect(report.moved).toEqual([])
+    expect(existsSync(join(dshHome, 'memory'))).toBe(true)
+  })
+
+  it('migrates project-layer dirs when a cwd is provided', () => {
+    const legacy = join(project, '.dsh', 'memory')
+    mkdirSync(legacy, { recursive: true })
+    writeFileSync(join(legacy, '2026-08-14.rules.remember.jsonl'), row, 'utf8')
+
+    const report = migrateLegacyMemoryDirs(project)
+    expect(report.moved).toContain(legacy)
+    expect(existsSync(join(project, '.dsh', 'lmemory', '2026-08-14.rules.remember.jsonl'))).toBe(true)
+
+    // 发现路径也自动迁移:visibleMemoryDirs(cwd) 后新目录可见、旧目录消失。
+    const dirs = visibleMemoryDirs(project)
+    expect(dirs).toContain(join(project, '.dsh', 'lmemory'))
+    expect(existsSync(legacy)).toBe(false)
+  })
+
+  it('migrates before write-root resolution (no dual-dir writes)', () => {
+    const legacy = join(dshHome, 'memory')
+    mkdirSync(legacy, { recursive: true })
+    writeFileSync(join(legacy, '2026-08-13.rules.remember.jsonl'), row, 'utf8')
+
+    const roots = memoryWriteRoots(project)
+    expect(roots.user).toBe(join(dshHome, 'lmemory'))
+    expect(existsSync(legacy)).toBe(false)
+  })
+})
+
 describe('project-layer precedence', () => {
   it('project file shadows a same-basename user file', () => {
     const roots = memoryWriteRoots(project)
-    mkdirSync(join(project, '.dsh', 'memory'), { recursive: true })
+    mkdirSync(join(project, '.dsh', 'lmemory'), { recursive: true })
     // 先在用户层写一条。
     const userDir = roots.user
     mkdirSync(userDir, { recursive: true })
@@ -154,7 +222,7 @@ describe('project-layer precedence', () => {
     )
     // 项目层同名文件覆盖。
     writeFileSync(
-      join(project, '.dsh', 'memory', `${base}.jsonl`),
+      join(project, '.dsh', 'lmemory', `${base}.jsonl`),
       '{"id":"m-0000000001","schemaVersion":2,"createdAt":1750000000000,"type":"rules","domain":"Style","scope":"全项目","layer":"project","entry":"项目层条目","entryPoint":"-","references":"-"}\n',
       'utf8',
     )

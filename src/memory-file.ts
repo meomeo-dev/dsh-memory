@@ -2,8 +2,11 @@
  * 记忆文件的发现与读取(纯 node 层,不 import cordis)。
  *
  * 目录优先级(低 → 高,同名 basename 后者覆盖):
- *   内置(包内 `memory/`) < 用户 `~/.agents/memory` < 用户 `~/.dsh/memory`
- *   < 项目 `<repo>/.agents/memory` < 项目 `<repo>/.dsh/memory`
+ *   内置(包内 `lmemory/`) < 用户 `~/.agents/lmemory` < 用户 `~/.dsh/lmemory`
+ *   < 项目 `<repo>/.agents/lmemory` < 项目 `<repo>/.dsh/lmemory`
+ *
+ * 旧目录一次性迁移:早期版本使用 `memory/` 作目录名,发现时自动 rename 到
+ * `lmemory/`(幂等,只动「含记忆产物或为空」的目录,见 docs/storage-and-collections.md §Q0)。
  *
  * 真相源是 `.remember.jsonl`;本模块只做「发现 + 读取」,写盘(追加 / 重写 / 渲染
  * MD / 更新 catalog)统一由 {@link ./store.js} 承载,避免两套独立写路径并存。读取时
@@ -13,7 +16,7 @@
  * @module dsh-memory/memory-file
  */
 
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,8 +24,8 @@ import { readJsonlMigrating } from './migrate.js'
 import type { MemoryEntry } from './schema.js'
 import { parseRecallLine } from './team.js'
 
-/** 内置记忆目录(包内 `memory/`);无内容时不存在,发现时跳过。 */
-const BUILTIN_MEMORY_DIR = fileURLToPath(new URL('../memory', import.meta.url))
+/** 内置记忆目录(包内 `lmemory/`);无内容时不存在,发现时跳过。 */
+const BUILTIN_MEMORY_DIR = fileURLToPath(new URL('../lmemory', import.meta.url))
 
 /** dsh home 环境变量覆盖(默认 `~/.dsh`)。 */
 const DSH_HOME_ENV = 'DSH_HOME'
@@ -40,6 +43,57 @@ function dshHome(): string {
 function agentsHome(): string {
   const fromEnv = process.env[AGENTS_HOME_ENV]
   return resolve(fromEnv !== undefined && fromEnv.trim().length > 0 ? fromEnv : join(homedir(), '.agents'))
+}
+
+/** 旧目录迁移报告(一次性 `memory/` → `lmemory/`,幂等)。 */
+export interface LegacyMigrationReport {
+  /** 已 rename 的旧目录(源路径)。 */
+  readonly moved: readonly string[]
+  /** 存在但「不像记忆目录」、被跳过不动的目录。 */
+  readonly skipped: readonly string[]
+}
+
+/** 判断一个目录是否「像我们的记忆目录」:含 `*.remember.jsonl` / `catalog.json`,或为空目录。 */
+function hasMemoryArtifacts(dir: string): boolean {
+  if (!existsSync(dir)) return false
+  const names = readdirSync(dir)
+  if (names.length === 0) return true
+  return names.some(name => name.endsWith('.remember.jsonl') || name === 'catalog.json')
+}
+
+/** 迁移一层目录:旧 `memory/` 存在且新 `lmemory/` 不存在时 rename(防御见他方同名目录)。 */
+function migrateLegacyDir(parent: string, report: { moved: string[]; skipped: string[] }): void {
+  const legacy = join(parent, 'memory')
+  const current = join(parent, 'lmemory')
+  if (!existsSync(legacy) || existsSync(current)) return
+  if (!hasMemoryArtifacts(legacy)) {
+    report.skipped.push(legacy)
+    return
+  }
+  renameSync(legacy, current)
+  report.moved.push(legacy)
+}
+
+/**
+ * 旧目录(`memory/`)→ 新目录(`lmemory/`)的一次性迁移(幂等)。
+ *
+ * 覆盖用户两层(恒迁)与项目两层(cwd 提供时);仅当旧目录含记忆产物或为空才 rename,
+ * 避免误拿他方工具的同名目录。{@link visibleMemoryDirs} 与 {@link memoryWriteRoots}
+ * 在每次发现/写根解析前执行(报告丢弃,保证读写路径永远先于发现迁移);启动期
+ * index.ts 显式调用一次并打印报告。
+ * @param cwd - 当前工作目录;提供时一并覆盖项目层两个目录。
+ * @returns 迁移报告。
+ */
+export function migrateLegacyMemoryDirs(cwd?: string): LegacyMigrationReport {
+  const report = { moved: [] as string[], skipped: [] as string[] }
+  migrateLegacyDir(dshHome(), report)
+  migrateLegacyDir(agentsHome(), report)
+  if (cwd !== undefined) {
+    const root = findProjectRoot(cwd)
+    migrateLegacyDir(join(root, '.dsh'), report)
+    migrateLegacyDir(join(root, '.agents'), report)
+  }
+  return report
 }
 
 /** 从 cwd 向上找项目根(以 `.git` 为标记),找不到则回退 cwd 本身。 */
@@ -73,9 +127,11 @@ export interface MemoryWriteRoots {
 
 /** 解析写根(dsh 规范目录优先)。 */
 export function memoryWriteRoots(cwd: string): MemoryWriteRoots {
+  // 写根解析同样先做旧目录一次性迁移(幂等)。
+  migrateLegacyMemoryDirs(cwd)
   return {
-    user: join(dshHome(), 'memory'),
-    project: join(findProjectRoot(cwd), '.dsh', 'memory'),
+    user: join(dshHome(), 'lmemory'),
+    project: join(findProjectRoot(cwd), '.dsh', 'lmemory'),
   }
 }
 
@@ -96,12 +152,14 @@ export function writeRootFor(cwd: string, layer: MemoryEntry['layer']): string {
  * @returns 可见记忆目录绝对路径列表。
  */
 export function visibleMemoryDirs(cwd?: string): string[] {
+  // 发现前先做旧目录一次性迁移(幂等;报告丢弃,启动期由 index.ts 显式调用并打日志)。
+  migrateLegacyMemoryDirs(cwd)
   const root = cwd === undefined ? '' : findProjectRoot(cwd)
   return [
     BUILTIN_MEMORY_DIR,
-    join(agentsHome(), 'memory'),
-    join(dshHome(), 'memory'),
-    ...(root === '' ? [] : [join(root, '.agents', 'memory'), join(root, '.dsh', 'memory')]),
+    join(agentsHome(), 'lmemory'),
+    join(dshHome(), 'lmemory'),
+    ...(root === '' ? [] : [join(root, '.agents', 'lmemory'), join(root, '.dsh', 'lmemory')]),
   ]
 }
 

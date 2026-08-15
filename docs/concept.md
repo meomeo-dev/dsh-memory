@@ -137,8 +137,8 @@ memory/YYYY-MM-DD[.<partition>].<memory_type>.remember.{jsonl|md}
 | 层(layer) | 落点 | 含义 |
 |---|---|---|
 | Global | 全局 | 跨所有项目生效(几乎不用) |
-| User | `~/.dsh/memory/` 或 `~/.agents/memory/` | 用户级,跨项目 |
-| Project | `<repo>/.dsh/memory/` 或 `<repo>/.agents/memory/` | 项目级,单仓库 |
+| User | `~/.dsh/lmemory/` 或 `~/.agents/lmemory/` | 用户级,跨项目 |
+| Project | `<repo>/.dsh/lmemory/` 或 `<repo>/.agents/lmemory/` | 项目级,单仓库 |
 
 写入 JSONL 的 `layer` 字段与工具 `layer` 枚举取**小写 id**:`global` / `user` / `project`(上表首字母大写仅为概念名)。
 

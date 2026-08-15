@@ -45,15 +45,15 @@ DeepSeek Harness 已有 `session-reference`(整段历史会话的有界引用),�
 复用 dsh-voice 的 `.dsh` / `.agents` 双根约定,按层覆盖:
 
 ```
-内置(包内 memory/) < 用户 ~/.agents/memory/ < 用户 ~/.dsh/memory/
-  < 项目 <repo>/.agents/memory/ < 项目 <repo>/.dsh/memory/
+内置(包内 lmemory/) < 用户 ~/.agents/lmemory/ < 用户 ~/.dsh/lmemory/
+  < 项目 <repo>/.agents/lmemory/ < 项目 <repo>/.dsh/lmemory/
 ```
 
 - 每个层级目录下,记忆按命名规范(见 concept.md §7)分文件:`YYYY-MM-DD[.<partition>].<type>.remember.{jsonl,md}`。
 - 项目根由 `.git` 标记向上探测。
 - 文件按「日期 + 分区 + 类型」天然可分片,正是记忆节点分区的依据。
 
-**写根**:`remember` 按 `layer` 参数决定写 `~/.dsh/memory/`(user)或 `<repo>/.dsh/memory/`(project)。`scope`(影响范围)是自由文本,不决定落点。
+**写根**:`remember` 按 `layer` 参数决定写 `~/.dsh/lmemory/`(user)或 `<repo>/.dsh/lmemory/`(project)。`scope`(影响范围)是自由文本,不决定落点。
 
 ## 5. 数据模型
 

@@ -46,9 +46,9 @@ Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链
 
 - **真相源** `.remember.jsonl`:一行一条 JSON,逐行 schema 校验(`id` 唯一编号、`createdAt` 创建时间(epoch 毫秒,系统赋值)、`type` ∈ rules/lessons、`domain` ∈ 21 枚举、`scope` 非空自由文本(影响范围)、`layer` ∈ global/user/project、`entry` 非空)。
 - **渲染投影** `.remember.md`:9 列 Markdown 表格(首列 `id` + 8 个字段,含创建时间),由纯函数渲染生成,绝不解析 MD。
-- **派生索引** `catalog.json`:每层 `memory/` 目录一个,记录「记忆 id → 所在文件」,全量重写、可 `rebuild` 重建(真相源仍是 jsonl)。
+- **派生索引** `catalog.json`:每层 `lmemory/` 目录一个,记录「记忆 id → 所在文件」,全量重写、可 `rebuild` 重建(真相源仍是 jsonl)。
 - 命名规范:`YYYY-MM-DD[.<partition>].<type>.remember.{jsonl,md}`。
-- 目录发现:内置 < 用户 `~/.agents/memory` < 用户 `~/.dsh/memory` < 项目 `<repo>/.agents/memory` < 项目 `<repo>/.dsh/memory`。
+- 目录发现:内置 < 用户 `~/.agents/lmemory` < 用户 `~/.dsh/lmemory` < 项目 `<repo>/.agents/lmemory` < 项目 `<repo>/.dsh/lmemory`。
 
 ## 文档
 
@@ -59,6 +59,7 @@ Web 模式下还有图形界面:`/lmemory ui` 返回带访问 token 的面板链
 - [data-contract.md](docs/data-contract.md) —— 数据契约与演进式数据设计:ER/3NF、Data+Schema+Migrate
 - [robustness.md](docs/robustness.md) —— 健壮性设计:节点容错、LLM 停机语义
 - [web-panel.md](docs/web-panel.md) —— Web 面板设计:路由、token、信任栅栏、RPC 端点、构建管线
+- [storage-and-collections.md](docs/storage-and-collections.md) —— 存储目录改名、整体注册表、记忆包导出、usage 持久化
 
 ## 状态
 

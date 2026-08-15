@@ -30,7 +30,7 @@ afterEach(() => {
 })
 
 function seedProjectFile(entry: string): void {
-  const dir = join(project, '.dsh', 'memory')
+  const dir = join(project, '.dsh', 'lmemory')
   mkdirSync(dir, { recursive: true })
   writeFileSync(
     join(dir, '2026-08-13.rules.remember.jsonl'),
