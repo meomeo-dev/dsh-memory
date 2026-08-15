@@ -25,3 +25,25 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Kb`
   return `${(bytes / 1024 / 1024).toFixed(1)} Mb`
 }
+
+/** 相对时间(`3s ago` / `5m ago` / `2h ago` / `3d ago`;节点页活状态用)。 */
+export function formatAgo(epochMs: number, now: number = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - epochMs) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+
+/** 运行时长(节点页「运行中 · Xs」;<1s 显示 `<1s`)。 */
+export function formatElapsed(epochMs: number, now: number = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - epochMs) / 1000))
+  return seconds < 1 ? '<1s' : `${seconds}s`
+}
+
+/** 耗时(`812ms` / `3.4s`;节点页最近一次调用用)。 */
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
+}

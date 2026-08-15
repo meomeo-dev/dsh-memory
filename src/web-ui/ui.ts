@@ -30,6 +30,7 @@ import type { DomainId, LayerId, MemoryEntry, MemoryType } from '../schema.js'
 import { CONFIG_KEYS, EXTRACT_MODES } from '../memory-runtime.js'
 import type { ConfigKey, MemoryConfig, TeamStatus } from '../memory-runtime.js'
 import type { MemoryStats, UsageCounter } from '../stats.js'
+import type { ProcessRow } from '../runtime-status.js'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 
 // ---- token ----
@@ -74,13 +75,14 @@ export function queryToken(rawUrl: string | undefined): string | undefined {
 // ---- 页面与 URL ----
 
 /** 面板页面。 */
-export type PanelPage = 'memory' | 'status' | 'collections' | 'settings'
+export type PanelPage = 'memory' | 'status' | 'collections' | 'nodes' | 'settings'
 
 /** 面板页面的路由路径(无尾斜杠)。 */
 export function panelPath(page: PanelPage): string {
   if (page === 'memory') return '/memory'
   if (page === 'status') return '/memory/status'
   if (page === 'collections') return '/memory/collections'
+  if (page === 'nodes') return '/memory/nodes'
   return '/memory/settings'
 }
 
@@ -430,6 +432,8 @@ export interface PanelDeps {
   forgetRoot(root: string): RootsView
   /** 导出全部(或单个)根到默认导出目录,返回产物信息。 */
   exportRoots(root: string | undefined): { dir: string; totalEntries: number; rootsExported: number }
+  /** 节点状态页视图模型(host 上全部进程;本进程置顶)。 */
+  nodes(): ProcessRow[]
   /** 当前配置的设置页描述。 */
   getConfig(): PanelConfigItem[]
   /** 写入配置补丁(经 settings scope 校验与 applyConfig),返回写入后的描述。 */
@@ -602,6 +606,12 @@ export async function handlePanelRpc(
         const parsed = parsePayload(TOKEN_PAYLOAD, payload)
         if (!parsed.ok) return panelError('bad-request', parsed.message)
         return { ok: true, value: { config: deps.getConfig() } }
+      }
+      case 'nodes-get': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(TOKEN_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: { processes: deps.nodes() } }
       }
       case 'config-set': {
         if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')

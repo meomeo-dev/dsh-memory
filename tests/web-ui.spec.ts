@@ -46,6 +46,7 @@ function makeDeps(overrides: Partial<PanelDeps> = {}): PanelDeps {
     addRoot: () => emptyView,
     forgetRoot: () => emptyView,
     exportRoots: () => ({ dir: '/out/x', totalEntries: 0, rootsExported: 0 }),
+    nodes: () => [],
     getConfig: () => describeConfig(DEFAULT_CONFIG),
     setConfig: async () => describeConfig(DEFAULT_CONFIG),
     ...overrides,
@@ -323,5 +324,31 @@ describe('handlePanelRpc', () => {
     expect(badAdd.ok).toBe(false)
     const noToken = await handlePanelRpc('roots-get', {}, token, deps)
     expect(noToken.ok).toBe(false)
+  })
+
+  it('serves the nodes view model through the deps (nodes-get)', async () => {
+    const row = {
+      formatVersion: 1, pid: 100, startedAt: 1755234567890, cwd: '/proj', port: 3080, lastSeenAt: 1755234599999,
+      teams: [{ root: '', nodes: 3, chars: 1200 }], summaryChars: 800,
+      nodes: {
+        recall: { running: 1, runningSince: 1755234598000, calls: 5, lastAt: 1755234597000, lastDurationMs: 812, lastOk: true },
+        extract: { running: 0, calls: 2, lastAt: 1755234400000, lastDurationMs: 3400, lastOk: false, lastError: 'timeout' },
+        review: { running: 0, calls: 0, lastAt: 0, lastDurationMs: 0, lastOk: true },
+      },
+    }
+    const deps = makeDeps({ nodes: () => [row] })
+    const result = await handlePanelRpc('nodes-get', { acToken: token }, token, deps)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const value = result.value as { processes: Array<{ pid: number; nodes: { recall: { running: number } } }> }
+      expect(value.processes).toHaveLength(1)
+      expect(value.processes[0]!.pid).toBe(100)
+      expect(value.processes[0]!.nodes.recall.running).toBe(1)
+    }
+    // token 门:缺失/非法 token 一律 bad-request。
+    const noToken = await handlePanelRpc('nodes-get', {}, token, deps)
+    expect(noToken.ok).toBe(false)
+    const badToken = await handlePanelRpc('nodes-get', { acToken: 'x'.repeat(64) }, token, deps)
+    expect(badToken.ok).toBe(false)
   })
 })

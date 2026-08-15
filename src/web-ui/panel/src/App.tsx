@@ -9,16 +9,18 @@ import { readBootstrap } from './api'
 import type { Bootstrap } from './api'
 import { CollectionsPage } from './pages/CollectionsPage'
 import { MemoryPage } from './pages/MemoryPage'
+import { NodesPage } from './pages/NodesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StatusPage } from './pages/StatusPage'
 
 /** 面板页面(导航 tab 的恒等集合)。 */
-const PAGES = ['memory', 'status', 'collections', 'settings'] as const
+const PAGES = ['memory', 'status', 'collections', 'nodes', 'settings'] as const
 
 const PAGE_LABELS: Readonly<Record<(typeof PAGES)[number], string>> = {
   memory: '记忆 (Memory)',
   status: '状态 (Status)',
   collections: '目录 (Collections)',
+  nodes: '节点 (Nodes)',
   settings: '设置 (Settings)',
 }
 
@@ -26,6 +28,7 @@ const PAGE_PATHS: Readonly<Record<(typeof PAGES)[number], string>> = {
   memory: '/memory',
   status: '/memory/status',
   collections: '/memory/collections',
+  nodes: '/memory/nodes',
   settings: '/memory/settings',
 }
 
@@ -65,7 +68,9 @@ export function App(): JSX.Element {
           ? <StatusPage bootstrap={bootstrap} />
           : bootstrap.page === 'collections'
             ? <CollectionsPage bootstrap={bootstrap} />
-            : <SettingsPage bootstrap={bootstrap} />}
+            : bootstrap.page === 'nodes'
+              ? <NodesPage bootstrap={bootstrap} />
+              : <SettingsPage bootstrap={bootstrap} />}
     </div>
   )
 }

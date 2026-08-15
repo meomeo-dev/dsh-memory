@@ -77,6 +77,16 @@ import { computeStats, EMPTY_USAGE, estimateTokens, recordUsage } from './stats.
 import type { UsageCounter } from './stats.js'
 import { aggregateByDay, appendUsageRow, readUsageRows } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
+import {
+  RUNTIME_HEARTBEAT_MS,
+  beginNode,
+  createNodeStates,
+  endNode,
+  listProcesses,
+  publishRuntime,
+  removeRuntimeFile,
+} from './runtime-status.js'
+import type { NodeRuntimeState, NodeStatusKey, RuntimeStatus, TeamRuntimeRow } from './runtime-status.js'
 import { COMMAND_HELPS, USAGE, parseLmemoryCommand, renderHelp } from './command.js'
 import { exportCollections } from './collections.js'
 import { forgetRoot, isMemoryRoot, loadRegistry, refreshRegistry, registerExplicitRoot, scanRootDetail } from './registry.js'
@@ -127,8 +137,8 @@ const SCHEMA: z<MemoryConfig> = z.object({
 /** 召回节点 system prompt(固定,非配置项)。 */
 const NODE_RECALL_SYSTEM = '你是长期记忆召回节点。给定一组记忆条目(每条一行,格式 `[id|type|domain|scope] 条目文本`)与一个查询,仅返回与查询相关的条目的**整行**(含方括号前缀),一行一条,照抄原文,不返回任何解释。无相关条目时返回空。'
 
-/** LLM 调用消耗的职责分类(与 stats.ts 的 UsageCounter 对应)。 */
-type UsageLabel = 'recall' | 'extract' | 'review'
+/** LLM 调用消耗的职责分类(与 stats.ts 的 UsageCounter 对应;与节点状态键同集)。 */
+type UsageLabel = NodeStatusKey
 
 /** 运行时可变状态:已预热 team + 当前配置 + 退火冷却计数器 + LLM 调用消耗。 */
 interface Runtime {
@@ -138,8 +148,14 @@ interface Runtime {
   readonly annealing: Map<string, number>
   /** 职责分类 → LLM 调用消耗累计(供 `/lmemory usage`)。 */
   readonly usage: Map<UsageLabel, UsageCounter>
+  /** 3 类节点的运行状态机(空闲/运行中/最近一次;见 runtime-status.js)。 */
+  readonly nodes: Record<NodeStatusKey, NodeRuntimeState>
+  /** 发布本进程运行时状态快照(apply 时绑定;节点状态变化与心跳时调用)。 */
+  publish: (now?: number) => void
   /** Web 面板访问 token(仅 web 模式注册;每次进程启动重新生成)。 */
   panelToken?: string
+  /** dsh web 监听端口(仅 web 模式;registerPanel 时回填,供状态快照)。 */
+  port?: number
 }
 
 /** remember 工具的规范化输出。 */
@@ -213,36 +229,83 @@ async function callFlash(
     source: { kind: 'plugin', plugin: 'dsh-memory' },
     content: [{ type: 'text', text: prompt }],
   })
+  // 节点运行状态:开始即发布(节点页可见「运行中」),结束(含失败)再发布。
+  const startedAt = Date.now()
+  beginNode(runtime.nodes, label, startedAt)
+  runtime.publish(startedAt)
   let text = ''
   let lastUsage: UsageLogRow | undefined
-  for await (const chunk of ctx.llm.stream({
-    provider: runtime.config.provider,
-    model,
-    system,
-    messages: [message],
-  })) {
-    if (chunk.type === 'text-delta') text += chunk.text
-    else if (chunk.type === 'usage') {
-      runtime.usage.set(label, recordUsage(runtime.usage.get(label) ?? EMPTY_USAGE, chunk.usage))
-      // 一次调用聚合为一行持久化日志(流式通常只发一个 usage chunk,取最后一次)。
-      lastUsage = {
-        ts: Date.now(),
-        label,
-        inputTokens: chunk.usage.inputTokens,
-        outputTokens: chunk.usage.outputTokens,
-        cacheReadTokens: chunk.usage.cacheReadTokens ?? 0,
+  try {
+    for await (const chunk of ctx.llm.stream({
+      provider: runtime.config.provider,
+      model,
+      system,
+      messages: [message],
+    })) {
+      if (chunk.type === 'text-delta') text += chunk.text
+      else if (chunk.type === 'usage') {
+        runtime.usage.set(label, recordUsage(runtime.usage.get(label) ?? EMPTY_USAGE, chunk.usage))
+        // 一次调用聚合为一行持久化日志(流式通常只发一个 usage chunk,取最后一次)。
+        lastUsage = {
+          ts: Date.now(),
+          label,
+          inputTokens: chunk.usage.inputTokens,
+          outputTokens: chunk.usage.outputTokens,
+          cacheReadTokens: chunk.usage.cacheReadTokens ?? 0,
+        }
+      } else if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
+        throw new Error(`memory recall call failed: ${chunk.reason.failure.message}`)
       }
-    } else if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
-      throw new Error(`memory recall call failed: ${chunk.reason.failure.message}`)
     }
+  } catch (error) {
+    endNode(runtime.nodes, label, startedAt, Date.now(), error instanceof Error ? error.message : String(error))
+    runtime.publish()
+    throw error
   }
   if (lastUsage !== undefined) appendUsageRow(lastUsage)
+  endNode(runtime.nodes, label, startedAt, Date.now())
+  runtime.publish()
   return text
 }
 
 /** 节点失败告警(per-node 容错的可观测性;绑定 ctx.logger.warn,不中断流程)。 */
 function warnNode(ctx: Context, label: string, error: unknown): void {
   ctx.logger.warn(`dsh-memory: ${label} failed: ${error instanceof Error ? error.message : String(error)}`)
+}
+
+/**
+ * 组装本进程运行时状态快照(身份 + team 装载 + 摘要体积 + 3 类节点状态),
+ * 落盘到 `~/.dsh/lmemory/runtime/<pid>-<startedAt>.json`(docs/node-status.md)。
+ * @param runtime - 运行时状态。
+ * @param pid - 本进程 pid。
+ * @param startedAt - 本进程启动时刻。
+ * @param now - 快照时刻。
+ * @returns 状态文件内容。
+ */
+function snapshotRuntime(runtime: Runtime, pid: number, startedAt: number, now: number): RuntimeStatus {
+  const teams: TeamRuntimeRow[] = []
+  for (const [root, team] of runtime.state.teams) {
+    let chars = 0
+    for (const node of team.nodes) chars += node.text.length
+    teams.push({ root, nodes: team.nodes.length, chars })
+  }
+  const labels: readonly UsageLabel[] = ['recall', 'extract', 'review']
+  const nodes = { recall: runtime.nodes.recall, extract: runtime.nodes.extract, review: runtime.nodes.review }
+  return {
+    formatVersion: 1,
+    pid,
+    startedAt,
+    cwd: process.cwd(),
+    ...(runtime.port === undefined ? {} : { port: runtime.port }),
+    lastSeenAt: now,
+    teams,
+    summaryChars: renderSummary(discoverEntries(process.cwd())).length,
+    nodes: {
+      recall: { ...nodes.recall, calls: runtime.usage.get(labels[0])?.calls ?? 0 },
+      extract: { ...nodes.extract, calls: runtime.usage.get(labels[1])?.calls ?? 0 },
+      review: { ...nodes.review, calls: runtime.usage.get(labels[2])?.calls ?? 0 },
+    },
+  }
 }
 
 /** 执行一次召回:预热 team → fan-out → 聚合(整行)→ 按 id 逆查补全字段。 */
@@ -579,6 +642,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
   }
   const token = generatePanelToken()
   runtime.panelToken = token
+  runtime.port = web.port
 
   const servePage = (page: PanelPage): WebRoute['handler'] => (req, res) => {
     // token 门:缺失或不匹配一律 403(常量时间比较)。
@@ -596,6 +660,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/status', handler: servePage('status') }), 'dsh-memory: /memory/status page')
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/collections', handler: servePage('collections') }), 'dsh-memory: /memory/collections page')
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/settings', handler: servePage('settings') }), 'dsh-memory: /memory/settings page')
+  ctx.effect(() => web.register({ kind: 'exact', path: '/memory/nodes', handler: servePage('nodes') }), 'dsh-memory: /memory/nodes page')
   ctx.effect(() => web.register({
     kind: 'prefix',
     path: '/memory-assets',
@@ -726,6 +791,10 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
         // 面板导出固定落默认导出目录(避免任意路径写面);CLI 的 --out 保持自由。
         return exportCollections(undefined, root === undefined ? {} : { roots: [resolve(root)] })
       },
+      nodes() {
+        // 节点状态页:host 上全部 dsh-memory 进程(本进程置顶;失效/清理由读取端处理)。
+        return listProcesses()
+      },
       getConfig() {
         return describeConfig(runtime.config)
       },
@@ -808,6 +877,8 @@ async function handleCommand(
             'Memory panel (展开后复制 URL):',
             `  记忆面板: ${panelUrl(port, 'memory', token)}`,
             `  状态面板: ${panelUrl(port, 'status', token)}`,
+            `  目录面板: ${panelUrl(port, 'collections', token)}`,
+            `  节点面板: ${panelUrl(port, 'nodes', token)}`,
             `  设置面板: ${panelUrl(port, 'settings', token)}`,
           ].join('\n'),
         }
@@ -1195,7 +1266,29 @@ function registerTools(ctx: Context, runtime: Runtime): void {
  * @param ctx - Cordis 上下文。
  */
 export function apply(ctx: Context): void {
-  const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG }, annealing: new Map(), usage: new Map() }
+  const runtime: Runtime = { state: createRuntimeState(), config: { ...DEFAULT_CONFIG }, annealing: new Map(), usage: new Map(), nodes: createNodeStates(), publish: () => {} }
+
+  // 跨进程运行时状态(docs/node-status.md):启动即发布 → 节点状态变化即发布 →
+  // 15s 心跳(顺带刷新 team 装载快照)→ fiber 销毁时清理器删除自己的文件。
+  const pid = process.pid
+  const startedAt = Date.now()
+  const publishNow = (now: number = Date.now()): void => {
+    try {
+      publishRuntime(snapshotRuntime(runtime, pid, startedAt, now))
+    } catch (error) {
+      ctx.logger.warn(`dsh-memory: runtime status publish failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  runtime.publish = publishNow
+  publishNow()
+  ctx.effect(() => {
+    const heartbeat = setInterval(publishNow, RUNTIME_HEARTBEAT_MS)
+    heartbeat.unref()
+    return () => {
+      clearInterval(heartbeat)
+      removeRuntimeFile(pid, startedAt)
+    }
+  }, 'dsh-memory: runtime status heartbeat')
 
   // 旧目录一次性迁移(用户两层):先于一切发现/写盘执行;项目层由发现路径惰性迁移。
   const migration = migrateLegacyMemoryDirs()

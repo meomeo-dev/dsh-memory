@@ -5,7 +5,7 @@
 
 /** HTML 壳注入的引导数据(见 host 侧 renderPanelShell)。 */
 export interface Bootstrap {
-  readonly page: 'memory' | 'status' | 'collections' | 'settings'
+  readonly page: 'memory' | 'status' | 'collections' | 'nodes' | 'settings'
   readonly token: string
   readonly channel: string
 }
@@ -18,7 +18,7 @@ export function readBootstrap(): Bootstrap | undefined {
     const value = JSON.parse(el.textContent) as unknown
     if (typeof value !== 'object' || value === null) return undefined
     const { page, token, channel } = value as Record<string, unknown>
-    if ((page !== 'memory' && page !== 'status' && page !== 'collections' && page !== 'settings') || typeof token !== 'string' || typeof channel !== 'string') {
+    if ((page !== 'memory' && page !== 'status' && page !== 'collections' && page !== 'nodes' && page !== 'settings') || typeof token !== 'string' || typeof channel !== 'string') {
       return undefined
     }
     return { page, token, channel }
@@ -127,6 +127,35 @@ export interface RootsView {
   }
 }
 
+/** 单个节点的运行时状态(镜像 host 侧 NodeRuntimeState)。 */
+export interface NodeRuntimeDto {
+  readonly running: number
+  readonly runningSince?: number
+  readonly calls: number
+  readonly lastAt: number
+  readonly lastDurationMs: number
+  readonly lastOk: boolean
+  readonly lastError?: string
+}
+
+/** 一个进程的行(镜像 host 侧 ProcessRow)。 */
+export interface ProcessRowDto {
+  readonly pid: number
+  readonly startedAt: number
+  readonly cwd: string
+  readonly port?: number
+  readonly lastSeenAt: number
+  readonly teams: readonly { readonly root: string; readonly nodes: number; readonly chars: number }[]
+  readonly summaryChars: number
+  readonly nodes: {
+    readonly recall: NodeRuntimeDto
+    readonly extract: NodeRuntimeDto
+    readonly review: NodeRuntimeDto
+  }
+  readonly stale: boolean
+  readonly isCurrent: boolean
+}
+
 /** 设置页配置项。 */
 export interface ConfigItem {
   readonly key: string
@@ -167,7 +196,7 @@ let rpcCounter = 0
  */
 export async function rpc<T>(
   bootstrap: Bootstrap,
-  endpoint: 'entries' | 'dashboard-get' | 'roots-get' | 'root-add' | 'root-forget' | 'root-export' | 'config-get' | 'config-set',
+  endpoint: 'entries' | 'dashboard-get' | 'roots-get' | 'root-add' | 'root-forget' | 'root-export' | 'config-get' | 'config-set' | 'nodes-get',
   payload: Record<string, unknown> = {},
 ): Promise<T> {
   const rpcId = `panel-${++rpcCounter}`

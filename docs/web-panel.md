@@ -6,9 +6,9 @@
 
 | 项 | 值 |
 |---|---|
-| 页面 | `/memory`(记忆页)、`/memory/status`(状态页)、`/memory/collections`(目录页)、`/memory/settings`(设置页) |
+| 页面 | `/memory`(记忆页)、`/memory/status`(状态页)、`/memory/collections`(目录页)、`/memory/nodes`(节点状态页)、`/memory/settings`(设置页) |
 | 静态资源 | `/memory-assets/*`(panel.js / style.css,前缀路由) |
-| RPC | `/memory-api` channel(entries / dashboard-get / roots-get / root-add / root-forget / root-export / config-get / config-set 八个端点) |
+| RPC | `/memory-api` channel(entries / dashboard-get / roots-get / root-add / root-forget / root-export / config-get / config-set / nodes-get 九个端点) |
 | 打开方式 | ① `/lmemory ui` 命令返回可点击链接(主入口);② 启动时经 harness logger 打印一行(web 模式下是否可见取决于 logger 接线) |
 
 URL 恒带 `ac_token`(每次进程启动用 crypto 随机重新生成,64 位 hex);token 不写盘、不跨进程复用。
@@ -45,6 +45,9 @@ POST /memory-api/root-export { acToken, root? } → 导出全部或单个根到�
   目录(~/dsh-memory-exports);面板不开放任意路径写,CLI --out 保持自由。
 POST /memory-api/config-get { acToken } → { config: [{ key, meta, value }] }(13 键,按 CONFIG_KEYS 顺序)
 POST /memory-api/config-set { acToken, patch } → 经 settings scope 校验并 applyConfig,返回写后 config
+POST /memory-api/nodes-get { acToken } → { processes: [ ProcessRow ] }
+  节点状态页视图:host 上全部 dsh-memory 进程(状态文件聚合,见 docs/node-status.md);
+  读取端标记心跳失效(已退出)并清理 >24h 残留,本进程置顶。
 ```
 
 RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload}` / `{type:"server-response",rpcId,result:{ok,value}}`;错误码只用 `bad-request`(载荷/token 非法)与 `internal`(依赖抛错)。
@@ -56,6 +59,7 @@ RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload
 - **记忆页**:顶部筛选组件(全文搜索 entry/scope/domain + type/domain/layer 下拉 + 计数),正文区 Timeline / Table 两种布局切换。Timeline 按创建日期分组(降序),卡片含 type/domain/layer 徽标、条目文本、scope/file/entryPoint/references 溯源;Table 平铺全部 10 列。
 - **状态页**:三区结构——顶部 team 状态(各 root 的已预热节点数 + maxNodeKb chip)、中部统计指标块(总条目 / rules / lessons / 各层 / 领域数 / 文件 / jsonl 与 md 体积 / catalog,网格卡片)、正文 usage 图表。图表为纯 SVG/div(零外部图表库,满足 CSP `default-src 'none'`):三张小图并列(token 分布甜甜圈、LLM 调用消耗堆叠条、静态上下文成本对比条),近 14 天每日用量(紧凑水平条形图:日期 | 三段条 | 总 token)与近 12 周日历热力图(5 档强度,deepseek 蓝)各占一整行;下方附用量明细表。带「刷新」按钮重取 `dashboard-get`。
 - **目录页**:展示已登记记忆根及其状态。用户故事:① 一眼看全机记忆根分布(位置/条目/文件/最近活跃);② 展开看文件级明细;③ 手动登记备份拷回的根;④ 移除登记(不动磁盘);⑤ 一键导出全部或单根记忆包。信息结构:页头(标题 + 导出全部)→ 汇总指标(根数/总条目/总文件)→ 登记表单(路径 + 校验)→ 根列表卡片(kind 徽标 / 路径 / 存活状态点 / 条目文件计数 / 首登与最近可见 / 导出·移除登记·文件明细操作)。
+- **节点状态页**:跨进程总览(设计见 docs/node-status.md)。用户故事:多会话并跑时定位卡住/报错的节点、看各进程装载与最近调用健康度、识别崩溃残留。信息结构:进程卡片列表(本进程置顶高亮;已退出沉底置灰),每卡三段——身份带(pid · port · 启动时间 · cwd)、装载带(每 root 预热 team 节点数/体积 + 摘要体积)、节点带(recall/extract/review 三行:状态点 + 运行中指示 + 累计 calls + 最近一次时间/耗时/错误)。5s 自动轮询 + 手动刷新。
 - **设置页**:13 个配置键的表单,按 kind 出控件(number / boolean / enum / string / textarea),统一「保存」提交 config-set,成功/失败横幅反馈。键集合与展示元数据在 `src/web-ui/ui.ts` 的 `PANEL_CONFIG_META`(测试锁定与 `CONFIG_KEYS` 不漂移)。
 
 ## 代码组织与构建
@@ -63,7 +67,7 @@ RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload
 ```
 src/web-ui/ui.ts           host 侧纯逻辑(不 import cordis):token、URL、HTML 壳、资源防穿越、RPC 分发
 src/web-ui/panel/          React 18 面板应用(vite 构建,React 打进单文件、零 CDN)
-src/web-ui/panel/src/      api.ts(线协议客户端)/ App.tsx(两页)/ main.tsx / styles.css
+src/web-ui/panel/src/      api.ts(线协议客户端)/ App.tsx(导航壳)/ pages/(五页)/ charts.tsx / format.ts / main.tsx / styles.css
 src/index.ts               接线:registerPanel(webServer + connection 存在时注册)+ /lmemory ui
 ```
 

@@ -1,0 +1,131 @@
+/*
+ * 节点状态页样式:进程卡片(身份带 / 装载带 / 节点带)。
+ * 共享基础(卡片/徽标/页头)见 ../styles.css;状态点颜色用 dsh 状态令牌。
+ */
+
+.proc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 已退出进程:整卡置灰降强调。 */
+.proc-card.stale {
+  opacity: 0.6;
+}
+
+.proc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.proc-id {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.proc-cwd {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.proc-cwd .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* 装载带:每 root 一行。 */
+.proc-load {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.team-load-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.team-load-root {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 节点带:状态点 | 名称 | 运行中指示 | 累计 calls | 最近一次。 */
+.proc-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.node-row {
+  display: grid;
+  grid-template-columns: 10px 130px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  align-self: center;
+}
+
+.node-dot.idle {
+  background: var(--dsw-alias-label-caption);
+}
+
+.node-dot.running {
+  background: var(--dsw-static-deepseek-500);
+}
+
+.node-label {
+  color: var(--dsw-alias-label-primary);
+}
+
+.node-running {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.node-running.hidden {
+  display: none;
+}
+
+.node-calls {
+  color: var(--dsw-alias-label-caption);
+  text-align: right;
+}
+
+.node-last {
+  color: var(--dsw-alias-label-tertiary);
+  text-align: right;
+}
+
+.node-last.error {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+@media (max-width: 720px) {
+  .node-row {
+    grid-template-columns: 10px 110px 1fr;
+  }
+
+  .node-last {
+    grid-column: 3;
+    text-align: left;
+  }
+}
