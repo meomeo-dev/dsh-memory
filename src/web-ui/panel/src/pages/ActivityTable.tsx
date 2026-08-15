@@ -57,7 +57,7 @@ export function ActivityTable({ activity }: { readonly activity: NonNullable<Das
   const tickCount = Math.ceil(buckets.length / cellsPerTick)
   return (
     <section className="card">
-      <span className="section-title">记忆活动 (近 24 小时,每 {bucketLabel(bucketMinutes)} 一格)</span>
+      <span className="section-title">记忆活动 (近 24 小时,每 {bucketLabel(bucketMinutes)}一格)</span>
       <div className="activity-wrap">
         <table className="activity-table">
           <thead>
@@ -93,7 +93,7 @@ export function ActivityTable({ activity }: { readonly activity: NonNullable<Das
           </tbody>
         </table>
       </div>
-      <p className="meta">格子 = 该 {bucketLabel(bucketMinutes)} 窗口内新写入的记忆条目数;≤999 原值,以上按量级封顶显示(99K/M/G/B/T),精确值悬停查看。按条目 createdAt 实时聚合,不落盘。</p>
+      <p className="meta">格子 = 该 {bucketLabel(bucketMinutes)}窗口内新写入的记忆条目数;≤999 原值,以上按量级封顶显示(99K/M/G/B/T),精确值悬停查看。按条目 createdAt 实时聚合,不落盘。</p>
     </section>
   )
 }
