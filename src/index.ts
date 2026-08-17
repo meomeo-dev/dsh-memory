@@ -313,6 +313,10 @@ function hostMemoryDirs(): string[] {
   for (const entry of loadRegistry().roots) {
     if (existsSync(entry.root)) dirs.push(entry.root)
   }
+  // global 目录显式追加(存在才计入;Set 去重 registry 已登记的情形)——写盘后
+  // 无需等下一次 refreshRegistry 即对面板 host 视图可见(docs/global-layer-design.md §5.2)。
+  const globalDir = visibleGlobalDir()
+  if (existsSync(globalDir)) dirs.push(globalDir)
   return [...new Set(dirs)]
 }
 
