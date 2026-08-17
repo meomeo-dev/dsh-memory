@@ -1,0 +1,84 @@
+/*
+ * Global 页样式:只读条目列表 + 动作区(抽取 / 提升 / 质检 / 导出导入)。
+ * 共享基础(卡片/徽标/横幅/空态)见 ../styles.css;此处只补页面专属布局。
+ */
+
+.hint {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  margin: 6px 0 10px;
+}
+
+.action-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.action-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.doc-input {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  font: inherit;
+  padding: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+}
+
+.result-block {
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.candidate-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.candidate-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.candidate-entry {
+  color: var(--dsw-alias-label-primary);
+}
+
+.candidate-reason {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.report-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 8px 0 0;
+  font: inherit;
+  color: var(--dsw-alias-label-primary);
+  max-height: 420px;
+  overflow: auto;
+}
+
+.global-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}

@@ -49,6 +49,14 @@ function makeDeps(overrides: Partial<PanelDeps> = {}): PanelDeps {
     nodes: () => [],
     getConfig: () => describeConfig(DEFAULT_CONFIG),
     setConfig: async () => describeConfig(DEFAULT_CONFIG),
+    globalEntries: () => [],
+    globalExtract: async () => [],
+    globalExtractConfirm: () => ({ wrote: 0, skipped: 0 }),
+    globalPromotePlan: () => ({ sourceEntries: 0, nodeCount: 0 }),
+    globalPromote: async () => ({ wrote: 0, skipped: 0 }),
+    globalReview: async () => ({ findings: 0, report: '' }),
+    globalExport: () => '{}',
+    globalImport: () => ({ ok: true, imported: 0, duplicates: 0, skipped: [], errors: [] }),
     ...overrides,
   }
 }
@@ -96,11 +104,13 @@ describe('panel URLs', () => {
     expect(panelPath('collections')).toBe('/memory/collections')
     expect(panelPath('nodes')).toBe('/memory/nodes')
     expect(panelPath('settings')).toBe('/memory/settings')
+    expect(panelPath('global')).toBe('/memory/global')
     expect(panelUrl(39140, 'memory', 'tok')).toBe('http://127.0.0.1:39140/memory?ac_token=tok')
     expect(panelUrl(39140, 'status', 'tok')).toBe('http://127.0.0.1:39140/memory/status?ac_token=tok')
     expect(panelUrl(39140, 'collections', 'tok')).toBe('http://127.0.0.1:39140/memory/collections?ac_token=tok')
     expect(panelUrl(39140, 'nodes', 'tok')).toBe('http://127.0.0.1:39140/memory/nodes?ac_token=tok')
     expect(panelUrl(39140, 'settings', 'tok')).toBe('http://127.0.0.1:39140/memory/settings?ac_token=tok')
+    expect(panelUrl(39140, 'global', 'tok')).toBe('http://127.0.0.1:39140/memory/global?ac_token=tok')
   })
 })
 
@@ -348,5 +358,92 @@ describe('handlePanelRpc', () => {
     expect(noToken.ok).toBe(false)
     const badToken = await handlePanelRpc('nodes-get', { acToken: 'x'.repeat(64) }, token, deps)
     expect(badToken.ok).toBe(false)
+  })
+})
+
+describe('global endpoints', () => {
+  const token = generatePanelToken()
+  const cand = {
+    type: 'rules', domain: 'Style', scope: '全项目', entry: '两空格缩进是跨项目共识', verdict: 'pass',
+  }
+
+  it('serves global-entries and global-export through the deps', async () => {
+    const deps = makeDeps({
+      globalEntries: () => [{ entry: entry({ layer: 'global' }), file: '/root/lmemory/global/x.remember.jsonl' }],
+      globalExport: () => '{"kind":"dsh-memory-global-export"}',
+    })
+    const list = await handlePanelRpc('global-entries', { acToken: token }, token, deps)
+    expect(list.ok).toBe(true)
+    if (list.ok) expect((list.value as { entries: Array<{ entry: { layer: string } }> }).entries[0]!.entry.layer).toBe('global')
+
+    const exported = await handlePanelRpc('global-export', { acToken: token }, token, deps)
+    expect(exported.ok).toBe(true)
+    if (exported.ok) expect((exported.value as { export: string }).export).toContain('dsh-memory-global-export')
+  })
+
+  it('extract stage 1 returns candidates; stage 2 forwards confirm + candidates to the confirm deps', async () => {
+    const calls: string[] = []
+    const deps = makeDeps({
+      globalExtract: async (text) => { calls.push(`extract:${text}`); return [cand as never] },
+      globalExtractConfirm: (candidates) => { calls.push(`confirm:${candidates.length}`); return { wrote: 1, skipped: 0 } },
+    })
+    const preview = await handlePanelRpc('global-extract', { acToken: token, text: '文档' }, token, deps)
+    expect(preview.ok).toBe(true)
+    if (preview.ok) expect((preview.value as { candidates: unknown[] }).candidates).toHaveLength(1)
+    expect(calls).toEqual(['extract:文档'])
+
+    const confirmed = await handlePanelRpc('global-extract', { acToken: token, text: '文档', confirm: true, candidates: [cand] }, token, deps)
+    expect(confirmed.ok).toBe(true)
+    if (confirmed.ok) expect(confirmed.value).toEqual({ wrote: 1, skipped: 0 })
+    expect(calls).toEqual(['extract:文档', 'confirm:1'])
+
+    // confirm 不带 candidates → bad-request(载荷校验,不触碰 deps)。
+    const missing = await handlePanelRpc('global-extract', { acToken: token, text: '文档', confirm: true }, token, deps)
+    expect(missing.ok).toBe(false)
+    if (!missing.ok) expect(missing.error.code).toBe('bad-request')
+  })
+
+  it('rejects documents over 1 MiB at the RPC layer before touching deps', async () => {
+    let touched = false
+    const deps = makeDeps({
+      globalExtract: async () => { touched = true; return [] },
+      globalImport: () => { touched = true; return { ok: true, imported: 0, duplicates: 0, skipped: [], errors: [] } },
+    })
+    const big = 'x'.repeat(1024 * 1024 + 1)
+    const extract = await handlePanelRpc('global-extract', { acToken: token, text: big }, token, deps)
+    expect(extract.ok).toBe(false)
+    if (!extract.ok) expect(extract.error.message).toContain('1 MiB')
+    const importBig = await handlePanelRpc('global-import', { acToken: token, text: big }, token, deps)
+    expect(importBig.ok).toBe(false)
+    if (!importBig.ok) expect(importBig.error.message).toContain('1 MiB')
+    expect(touched).toBe(false)
+  })
+
+  it('promote plan is served without confirm; confirm executes through the deps', async () => {
+    const calls: string[] = []
+    const deps = makeDeps({
+      globalPromotePlan: () => { calls.push('plan'); return { sourceEntries: 3, nodeCount: 1, costYuan: 0.01 } },
+      globalPromote: async () => { calls.push('run'); return { wrote: 2, skipped: 1 } },
+    })
+    const plan = await handlePanelRpc('global-promote', { acToken: token }, token, deps)
+    expect(plan.ok).toBe(true)
+    if (plan.ok) expect((plan.value as { plan: { nodeCount: number } }).plan.nodeCount).toBe(1)
+    const run = await handlePanelRpc('global-promote', { acToken: token, confirm: true }, token, deps)
+    expect(run.ok).toBe(true)
+    if (run.ok) expect(run.value).toEqual({ wrote: 2, skipped: 1 })
+    expect(calls).toEqual(['plan', 'run'])
+  })
+
+  it('global-review and global-import pass through the deps', async () => {
+    const deps = makeDeps({
+      globalReview: async () => ({ findings: 2, report: '缺陷报告' }),
+      globalImport: () => ({ ok: false, reason: '不是真实的 global 导出' }),
+    })
+    const review = await handlePanelRpc('global-review', { acToken: token }, token, deps)
+    expect(review.ok).toBe(true)
+    if (review.ok) expect((review.value as { findings: number }).findings).toBe(2)
+    const imported = await handlePanelRpc('global-import', { acToken: token, text: '{}' }, token, deps)
+    expect(imported.ok).toBe(true)
+    if (imported.ok) expect(imported.value).toEqual({ ok: false, reason: '不是真实的 global 导出' })
   })
 })

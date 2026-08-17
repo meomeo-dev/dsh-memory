@@ -93,6 +93,7 @@ import {
   runGlobalPromoteFanOut,
 } from './global-gate.js'
 import type { GlobalCandidate } from './global-gate.js'
+import { buildGlobalExport, importGlobalEntries, parseGlobalExport } from './global-io.js'
 import { aggregateEntryActivity } from './memory-activity.js'
 import {
   RUNTIME_HEARTBEAT_MS,
@@ -757,6 +758,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/collections', handler: servePage('collections') }), 'dsh-memory: /memory/collections page')
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/settings', handler: servePage('settings') }), 'dsh-memory: /memory/settings page')
   ctx.effect(() => web.register({ kind: 'exact', path: '/memory/nodes', handler: servePage('nodes') }), 'dsh-memory: /memory/nodes page')
+  ctx.effect(() => web.register({ kind: 'exact', path: '/memory/global', handler: servePage('global') }), 'dsh-memory: /memory/global page')
   ctx.effect(() => web.register({
     kind: 'prefix',
     path: '/memory-assets',
@@ -923,6 +925,62 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
         applyConfig(runtime, scope.get())
         return describeConfig(runtime.config)
       },
+      globalEntries() {
+        // host 级视图 layer=global 过滤(§9.1;global 目录经 registry 固定根进入 hostMemoryDirs)。
+        const rows = findIn(hostMemoryDirs(), { layer: 'global' })
+        rows.sort((a, b) => b.entry.createdAt - a.entry.createdAt)
+        return rows.map(({ entry, file }) => ({ entry, file }))
+      },
+      async globalExtract(text) {
+        // 抽取阶段 1:候选回显(不发写盘;1MiB 已由 RPC 层硬校验)。
+        return runGlobalExtractFanOut(
+          globalExtractSources(text, runtime.config.maxNodeKb * 1000),
+          async chunk => callFlash(ctx, runtime, GLOBAL_EXTRACT_RULES_SYSTEM, `文档片段:\n${chunk}`, 'extract', runtime.config.model),
+          async chunk => callFlash(ctx, runtime, GLOBAL_EXTRACT_LESSONS_SYSTEM, `文档片段:\n${chunk}`, 'extract', runtime.config.model),
+          (type, error) => warnNode(ctx, `global-extract ${type}`, error),
+        )
+      },
+      globalExtractConfirm(candidates) {
+        // 确认写盘:服务端对每条候选重跑 gate + schema 后才 append(客户端 verdict 仅供回显)。
+        return writeGlobalCandidates(candidates)
+      },
+      globalPromotePlan() {
+        const entries = promoteSourceEntries()
+        const plan = resolvePromotePlan(entries, runtime.config.maxNodeKb)
+        const pricing = loadPricing()
+        const cost = pricing.ok
+          ? estimatePromoteCost(pricing.table, runtime.config.reviewModel, plan.nodeCount, runtime.config.maxNodeKb)
+          : undefined
+        return {
+          sourceEntries: entries.length,
+          nodeCount: plan.nodeCount,
+          ...(cost === undefined ? {} : { costYuan: cost }),
+          ...(pricing.ok ? {} : { costError: pricing.error }),
+        }
+      },
+      async globalPromote() {
+        const entries = promoteSourceEntries()
+        const candidates = await runGlobalPromoteFanOut(
+          entries,
+          runtime.config.maxNodeKb,
+          async node => callFlash(ctx, runtime, GLOBAL_PROMOTE_SYSTEM, `记忆条目:\n${node.text}`, 'review', runtime.config.reviewModel),
+          (nodeId, error) => warnNode(ctx, `global-promote ${nodeId}`, error),
+        )
+        return writeGlobalCandidates(candidates)
+      },
+      async globalReview() {
+        const findings = await reviewEntries(ctx, runtime, discoverGlobalEntries())
+        return { findings: findings.length, report: renderReviewReport(findings) }
+      },
+      globalExport() {
+        return JSON.stringify(buildGlobalExport(), null, 2)
+      },
+      globalImport(text) {
+        const parsed = parseGlobalExport(text)
+        if (!parsed.ok) return { ok: false, reason: parsed.reason }
+        const result = importGlobalEntries(parsed.doc)
+        return { ok: true, ...result }
+      },
     }
 
     const disposeChannel = cctx.connection.rpc.handle(
@@ -980,9 +1038,9 @@ function readDocumentFile(path: string): string {
  * entry 精确去重(rules/lessons 都去重)→ append(global 根,内部 schema 校验)。
  * 确认阶段的服务端重跑不绕过 gate(§7.1、G1)。
  * @param candidates - 待写候选(含 verdict,写盘只看 gate 硬查)。
- * @returns 写盘结果文案。
+ * @returns 写入数与被拒数(gate 拒绝或重复)。
  */
-function writeGlobalCandidates(candidates: readonly GlobalCandidate[]): string {
+function writeGlobalCandidates(candidates: readonly GlobalCandidate[]): { wrote: number; skipped: number } {
   const existing = new Set(discoverGlobalEntries().map(entry => entry.entry))
   const pending = candidates.filter(candidate => checkGlobalGate(candidate).pass && !existing.has(candidate.entry))
   const skipped = candidates.length - pending.length
@@ -990,9 +1048,14 @@ function writeGlobalCandidates(candidates: readonly GlobalCandidate[]): string {
     append(undefined, { ...candidate, layer: 'global' })
   }
   if (pending.length > 0) rebuild(undefined, [visibleGlobalDir()])
-  return skipped > 0
-    ? `wrote ${pending.length} global entr(ies), skipped ${skipped} (gate reject or duplicate).`
-    : `wrote ${pending.length} global entr(ies).`
+  return { wrote: pending.length, skipped }
+}
+
+/** 写盘结果的 CLI 文案。 */
+function describeGlobalWrite(result: { wrote: number; skipped: number }): string {
+  return result.skipped > 0
+    ? `wrote ${result.wrote} global entr(ies), skipped ${result.skipped} (gate reject or duplicate).`
+    : `wrote ${result.wrote} global entr(ies).`
 }
 
 /** global extract 回显:每条候选 + 确定性 gate 结论(§4.1)。 */
@@ -1055,6 +1118,7 @@ async function handleCommand(
             `  目录面板: ${panelUrl(port, 'collections', token)}`,
             `  节点面板: ${panelUrl(port, 'nodes', token)}`,
             `  设置面板: ${panelUrl(port, 'settings', token)}`,
+            `  Global 面板: ${panelUrl(port, 'global', token)}`,
           ].join('\n'),
         }
       }
@@ -1107,7 +1171,7 @@ async function handleCommand(
             // --confirm 命中暂存:零调用直接写盘(决策 D9;gate 在写盘侧重跑,不绕过)。
             if (command.confirm && !command.dryRun && staged !== undefined && staged.key === key) {
               runtime.globalStaged = undefined
-              return { kind: 'success', text: writeGlobalCandidates(staged.candidates) }
+              return { kind: 'success', text: describeGlobalWrite(writeGlobalCandidates(staged.candidates)) }
             }
             const candidates = await runGlobalExtractFanOut(
               globalExtractSources(text, runtime.config.maxNodeKb * 1000),
@@ -1120,7 +1184,7 @@ async function handleCommand(
             runtime.globalStaged = { key, candidates }
             if (command.confirm) {
               runtime.globalStaged = undefined
-              return { kind: 'success', text: `${echo}\n${writeGlobalCandidates(candidates)}` }
+              return { kind: 'success', text: `${echo}\n${describeGlobalWrite(writeGlobalCandidates(candidates))}` }
             }
             return { kind: 'success', text: echo }
           }
@@ -1141,7 +1205,7 @@ async function handleCommand(
               async node => callFlash(ctx, runtime, GLOBAL_PROMOTE_SYSTEM, `记忆条目:\n${node.text}`, 'review', runtime.config.reviewModel),
               (nodeId, error) => warnNode(ctx, `global-promote ${nodeId}`, error),
             )
-            return { kind: 'success', text: `${head}\n${writeGlobalCandidates(candidates)}` }
+            return { kind: 'success', text: `${head}\n${describeGlobalWrite(writeGlobalCandidates(candidates))}` }
           }
           case 'review': {
             const findings = await reviewEntries(ctx, runtime, discoverGlobalEntries())

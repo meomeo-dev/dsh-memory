@@ -30,6 +30,8 @@ import { DOMAINS, LAYERS, MEMORY_TYPES } from '../schema.js'
 import type { DomainId, LayerId, MemoryEntry, MemoryType } from '../schema.js'
 import { CONFIG_KEYS, EXTRACT_MODES, SUMMARY_MODES } from '../memory-runtime.js'
 import type { ConfigKey, MemoryConfig, TeamStatus } from '../memory-runtime.js'
+import { GLOBAL_DOC_MAX_BYTES } from '../global-gate.js'
+import type { GlobalCandidate } from '../global-gate.js'
 import type { MemoryStats, UsageCounter } from '../stats.js'
 import type { ProcessRow } from '../runtime-status.js'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
@@ -76,7 +78,7 @@ export function queryToken(rawUrl: string | undefined): string | undefined {
 // ---- 页面与 URL ----
 
 /** 面板页面。 */
-export type PanelPage = 'memory' | 'status' | 'collections' | 'nodes' | 'settings'
+export type PanelPage = 'memory' | 'status' | 'collections' | 'nodes' | 'settings' | 'global'
 
 /** 面板页面的路由路径(无尾斜杠)。 */
 export function panelPath(page: PanelPage): string {
@@ -84,6 +86,7 @@ export function panelPath(page: PanelPage): string {
   if (page === 'status') return '/memory/status'
   if (page === 'collections') return '/memory/collections'
   if (page === 'nodes') return '/memory/nodes'
+  if (page === 'global') return '/memory/global'
   return '/memory/settings'
 }
 
@@ -456,6 +459,44 @@ export interface RootsView {
   }
 }
 
+/** global 页的一条候选(带模型 verdict,供回显;客户端仅回传,不参与判定)。 */
+export type GlobalCandidateView = GlobalCandidate
+
+/** global-extract 两阶段结果:阶段 1 = 候选回显(不写盘),阶段 2 = 确认写盘(服务端重跑 gate)。 */
+export interface GlobalExtractView {
+  /** 阶段 1:候选(带 verdict)与 gate 结论由客户端逐条展示。 */
+  readonly candidates: readonly GlobalCandidate[]
+  /** 阶段 2(confirm):写盘汇总。 */
+  readonly wrote?: number
+  /** 阶段 2(confirm):被 gate / 去重拒绝的条数。 */
+  readonly skipped?: number
+}
+
+/** global-promote 计划回显(确认前;未确认不发调用)。 */
+export interface GlobalPromotePlanView {
+  /** 提升源条目数(user/project,host 级)。 */
+  readonly sourceEntries: number
+  /** 分区后的节点数。 */
+  readonly nodeCount: number
+  /** 预计成本(元);价格表缺模型时缺省。 */
+  readonly costYuan?: number
+  /** 价格表不可用原因。 */
+  readonly costError?: string
+}
+
+/** global-promote 执行结果(确认后)。 */
+export interface GlobalPromoteDoneView {
+  /** 写入的 global 条目数。 */
+  readonly wrote: number
+  /** 被 gate / 去重拒绝的条数。 */
+  readonly skipped: number
+}
+
+/** global 导入结果(防线拒绝或导入汇总;镜像 global-io 的返回)。 */
+export type GlobalImportView =
+  | { readonly ok: true; readonly imported: number; readonly duplicates: number; readonly skipped: readonly { entry: string; reason: string }[]; readonly errors: readonly string[] }
+  | { readonly ok: false; readonly reason: string }
+
 /** 面板 RPC 通道的注入依赖(纯接口,由 index.ts 闭包提供)。 */
 export interface PanelDeps {
   /** 按过滤条件列出 host 级记忆(注册表视图,带所在文件绝对路径);实现须按 createdAt 降序返回。 */
@@ -476,6 +517,22 @@ export interface PanelDeps {
   getConfig(): PanelConfigItem[]
   /** 写入配置补丁(经 settings scope 校验与 applyConfig),返回写入后的描述。 */
   setConfig(patch: Record<string, unknown>): Promise<PanelConfigItem[]>
+  /** global 页条目(host 视图 layer=global 过滤)。 */
+  globalEntries(): PanelEntryRow[]
+  /** 抽取阶段 1:文档文本 → 候选回显(不发写盘;1MiB 已由 RPC 层硬校验)。 */
+  globalExtract(text: string): Promise<readonly GlobalCandidate[]>
+  /** 抽取阶段 2:确认写盘(服务端对每条候选重跑 gate + schema 后 append)。 */
+  globalExtractConfirm(candidates: readonly GlobalCandidate[]): { wrote: number; skipped: number }
+  /** 提升计划回显(未确认不发调用)。 */
+  globalPromotePlan(): GlobalPromotePlanView
+  /** 提升执行(确认后;计划 → fan-out → gate → append)。 */
+  globalPromote(): Promise<GlobalPromoteDoneView>
+  /** global 质检(review<global-type1>),返回缺陷数与报告全文。 */
+  globalReview(): Promise<{ findings: number; report: string }>
+  /** global 导出包全文(JSON 文本)。 */
+  globalExport(): string
+  /** global 导入(防线链 kind→formatVersion→migrate→gate→layer→两轮去重→append)。 */
+  globalImport(text: string): GlobalImportView
 }
 
 /** `entries` 请求载荷(host 级注册表视图,不再携带 cwd)。 */
@@ -512,6 +569,38 @@ interface ConfigSetPayload {
   patch: Record<string, unknown>
 }
 
+/** `global-extract` 请求载荷(两阶段同端点:阶段 1 只带 text,阶段 2 带 confirm + candidates)。 */
+interface GlobalExtractPayload {
+  acToken: string
+  text: string
+  confirm?: boolean
+  candidates?: GlobalCandidate[]
+}
+
+/** `global-promote` 请求载荷(confirm 缺省 = 只回显计划)。 */
+interface GlobalPromotePayload {
+  acToken: string
+  confirm?: boolean
+}
+
+/** `global-import` 请求载荷(导出包全文)。 */
+interface GlobalImportPayload {
+  acToken: string
+  text: string
+}
+
+/** 从 wire 重建的一条候选(最小面;服务端逐条重跑 gate,客户端 verdict 仅供回显)。 */
+const GLOBAL_CANDIDATE_ITEM: z<GlobalCandidate> = z.object({
+  type: z.union(['rules', 'lessons']),
+  domain: z.union([...DOMAINS]),
+  scope: z.string().min(1),
+  entry: z.string().min(1),
+  entryPoint: z.string(),
+  references: z.string(),
+  verdict: z.union(['pass', 'reject']),
+  reason: z.string(),
+})
+
 const ENTRIES_PAYLOAD: z<EntriesPayload> = z.object({
   acToken: z.string().min(1).required(),
   filters: z.object({
@@ -539,6 +628,23 @@ const ROOT_EXPORT_PAYLOAD: z<RootExportPayload> = z.object({
 const CONFIG_SET_PAYLOAD: z<ConfigSetPayload> = z.object({
   acToken: z.string().min(1).required(),
   patch: z.object({}).required(),
+})
+
+const GLOBAL_EXTRACT_PAYLOAD: z<GlobalExtractPayload> = z.object({
+  acToken: z.string().min(1).required(),
+  text: z.string().min(1).required(),
+  confirm: z.boolean(),
+  candidates: z.array(GLOBAL_CANDIDATE_ITEM),
+})
+
+const GLOBAL_PROMOTE_PAYLOAD: z<GlobalPromotePayload> = z.object({
+  acToken: z.string().min(1).required(),
+  confirm: z.boolean(),
+})
+
+const GLOBAL_IMPORT_PAYLOAD: z<GlobalImportPayload> = z.object({
+  acToken: z.string().min(1).required(),
+  text: z.string().min(1).required(),
 })
 
 /** 载荷解析结果。 */
@@ -642,6 +748,61 @@ export async function handlePanelRpc(
         const parsed = parsePayload(CONFIG_SET_PAYLOAD, payload)
         if (!parsed.ok) return panelError('bad-request', parsed.message)
         return { ok: true, value: { config: await deps.setConfig(parsed.value.patch) } }
+      }
+      case 'global-entries': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(TOKEN_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: { entries: deps.globalEntries() } }
+      }
+      case 'global-extract': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(GLOBAL_EXTRACT_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        // 1 MiB 硬上限(token 门不能代替上限校验;docs/global-layer-design.md §4.1)。
+        if (Buffer.byteLength(parsed.value.text, 'utf8') > GLOBAL_DOC_MAX_BYTES) {
+          return panelError('bad-request', `document exceeds the ${GLOBAL_DOC_MAX_BYTES / 1024 / 1024} MiB limit`)
+        }
+        if (parsed.value.confirm !== true) {
+          const candidates = await deps.globalExtract(parsed.value.text)
+          return { ok: true, value: { candidates } }
+        }
+        if (!Array.isArray(parsed.value.candidates) || parsed.value.candidates.length === 0) {
+          return panelError('bad-request', 'confirm requires the echoed candidates payload')
+        }
+        const written = deps.globalExtractConfirm(parsed.value.candidates)
+        return { ok: true, value: written }
+      }
+      case 'global-promote': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(GLOBAL_PROMOTE_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        if (parsed.value.confirm !== true) {
+          return { ok: true, value: { plan: deps.globalPromotePlan() } }
+        }
+        return { ok: true, value: await deps.globalPromote() }
+      }
+      case 'global-review': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(TOKEN_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: await deps.globalReview() }
+      }
+      case 'global-export': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(TOKEN_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        return { ok: true, value: { export: deps.globalExport() } }
+      }
+      case 'global-import': {
+        if (!authorized(payload, token)) return panelError('bad-request', 'missing or invalid acToken')
+        const parsed = parsePayload(GLOBAL_IMPORT_PAYLOAD, payload)
+        if (!parsed.ok) return panelError('bad-request', parsed.message)
+        // 导入同受 1 MiB 硬上限(§9.3 防线之前)。
+        if (Buffer.byteLength(parsed.value.text, 'utf8') > GLOBAL_DOC_MAX_BYTES) {
+          return panelError('bad-request', `import document exceeds the ${GLOBAL_DOC_MAX_BYTES / 1024 / 1024} MiB limit`)
+        }
+        return { ok: true, value: deps.globalImport(parsed.value.text) }
       }
       default:
         return panelError('bad-request', `unknown endpoint ${JSON.stringify(endpoint)}`)

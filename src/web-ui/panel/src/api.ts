@@ -5,7 +5,7 @@
 
 /** HTML 壳注入的引导数据(见 host 侧 renderPanelShell)。 */
 export interface Bootstrap {
-  readonly page: 'memory' | 'status' | 'collections' | 'nodes' | 'settings'
+  readonly page: 'memory' | 'status' | 'collections' | 'nodes' | 'settings' | 'global'
   readonly token: string
   readonly channel: string
 }
@@ -18,7 +18,7 @@ export function readBootstrap(): Bootstrap | undefined {
     const value = JSON.parse(el.textContent) as unknown
     if (typeof value !== 'object' || value === null) return undefined
     const { page, token, channel } = value as Record<string, unknown>
-    if ((page !== 'memory' && page !== 'status' && page !== 'collections' && page !== 'nodes' && page !== 'settings') || typeof token !== 'string' || typeof channel !== 'string') {
+    if ((page !== 'memory' && page !== 'status' && page !== 'collections' && page !== 'nodes' && page !== 'settings' && page !== 'global') || typeof token !== 'string' || typeof channel !== 'string') {
       return undefined
     }
     return { page, token, channel }
@@ -218,6 +218,31 @@ export const DISPLAY = {
   layers: ['global', 'user', 'project'] as const,
 }
 
+/** global 页的一条候选(带模型 verdict;镜像 host 侧 GlobalCandidate)。 */
+export interface GlobalCandidateDto {
+  readonly type: 'rules' | 'lessons'
+  readonly domain: string
+  readonly scope: string
+  readonly entry: string
+  readonly entryPoint?: string
+  readonly references?: string
+  readonly verdict: 'pass' | 'reject'
+  readonly reason?: string
+}
+
+/** global-promote 计划回显(镜像 host 侧 GlobalPromotePlanView)。 */
+export interface GlobalPromotePlanDto {
+  readonly sourceEntries: number
+  readonly nodeCount: number
+  readonly costYuan?: number
+  readonly costError?: string
+}
+
+/** global 导入结果(镜像 host 侧 GlobalImportView)。 */
+export type GlobalImportDto =
+  | { readonly ok: true; readonly imported: number; readonly duplicates: number; readonly skipped: readonly { entry: string; reason: string }[]; readonly errors: readonly string[] }
+  | { readonly ok: false; readonly reason: string }
+
 let rpcCounter = 0
 
 /**
@@ -230,7 +255,7 @@ let rpcCounter = 0
  */
 export async function rpc<T>(
   bootstrap: Bootstrap,
-  endpoint: 'entries' | 'dashboard-get' | 'roots-get' | 'root-add' | 'root-forget' | 'root-export' | 'config-get' | 'config-set' | 'nodes-get',
+  endpoint: 'entries' | 'dashboard-get' | 'roots-get' | 'root-add' | 'root-forget' | 'root-export' | 'config-get' | 'config-set' | 'nodes-get' | 'global-entries' | 'global-extract' | 'global-promote' | 'global-review' | 'global-export' | 'global-import',
   payload: Record<string, unknown> = {},
 ): Promise<T> {
   const rpcId = `panel-${++rpcCounter}`

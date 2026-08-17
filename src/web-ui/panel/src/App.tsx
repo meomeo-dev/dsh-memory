@@ -8,13 +8,14 @@ import { useState } from 'react'
 import { readBootstrap } from './api'
 import type { Bootstrap } from './api'
 import { CollectionsPage } from './pages/CollectionsPage'
+import { GlobalPage } from './pages/GlobalPage'
 import { MemoryPage } from './pages/MemoryPage'
 import { NodesPage } from './pages/NodesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StatusPage } from './pages/StatusPage'
 
 /** 面板页面(导航 tab 的恒等集合)。 */
-const PAGES = ['memory', 'status', 'collections', 'nodes', 'settings'] as const
+const PAGES = ['memory', 'status', 'collections', 'nodes', 'settings', 'global'] as const
 
 const PAGE_LABELS: Readonly<Record<(typeof PAGES)[number], string>> = {
   memory: '记忆 (Memory)',
@@ -22,6 +23,7 @@ const PAGE_LABELS: Readonly<Record<(typeof PAGES)[number], string>> = {
   collections: '目录 (Collections)',
   nodes: '节点 (Nodes)',
   settings: '设置 (Settings)',
+  global: 'Global',
 }
 
 const PAGE_PATHS: Readonly<Record<(typeof PAGES)[number], string>> = {
@@ -30,9 +32,10 @@ const PAGE_PATHS: Readonly<Record<(typeof PAGES)[number], string>> = {
   collections: '/memory/collections',
   nodes: '/memory/nodes',
   settings: '/memory/settings',
+  global: '/memory/global',
 }
 
-/** 页面导航(四页互链,恒带 ac_token)。 */
+/** 页面导航(六页互链,恒带 ac_token)。 */
 function Nav({ page, token }: { readonly page: Bootstrap['page']; readonly token: string }): JSX.Element {
   const target = (next: Bootstrap['page']) => next === page
     ? undefined
@@ -70,7 +73,9 @@ export function App(): JSX.Element {
             ? <CollectionsPage bootstrap={bootstrap} />
             : bootstrap.page === 'nodes'
               ? <NodesPage bootstrap={bootstrap} />
-              : <SettingsPage bootstrap={bootstrap} />}
+              : bootstrap.page === 'global'
+                ? <GlobalPage bootstrap={bootstrap} />
+                : <SettingsPage bootstrap={bootstrap} />}
     </div>
   )
 }
