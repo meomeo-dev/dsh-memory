@@ -74,6 +74,19 @@ erDiagram
 
 `.remember.jsonl`(真相源)+ `.remember.md`(投影)+ `catalog.json`(派生索引)。
 
+- **global 目录约定**(global-layer-design.md §5):`~/.dsh/lmemory/global/` 独立持有一份
+  `catalog.json`,文件命名与三层一致(`YYYY-MM-DD[.<partition>].<type>.remember.{jsonl,md}`);
+  目录即身份,`layer` 字段仍为 `global`。global 目录不进 user/project 发现链,按消费方显式追加。
+- **存量 global 条目迁移**:`migrateLegacyGlobalEntries()`(幂等)把两个用户根顶层 jsonl 中
+  `layer==='global'` 的行移入 global 目录当天文件,源文件重写 + 两侧 catalog 重写;迁移后
+  「layer=global 的条目」与「global 目录的条目」恒为同一集合。
+- **global 导出包**(global-layer-design.md §9.2):单文件 JSON 包
+  `{ kind: 'dsh-memory-global-export', formatVersion: 1, exportedAt, source: 'dsh-memory',
+  entries: [完整 MemoryEntry 10 字段] }`。kind 与 formatVersion 独立于 collections
+  manifest 演进;导入防线第一步先查 kind(与 collections manifest 无 kind 区分,顺序不可调换),
+  再查 formatVersion(不支持的高版本拒绝并提示升级),然后逐条走与读盘同一条
+  `migrateRecord` 链(不是裸 validateEntry)。
+
 ### 4.2 Schema —— `schema/memory-entry.schema.yaml`(单一真相源)
 
 **已决策:单一真相源。** `schema/memory-entry.schema.yaml`(JSON Schema 的 YAML)是数据契约的**唯一权威**,运行时 schemastery 校验器由它**生成**,不手写第二份。

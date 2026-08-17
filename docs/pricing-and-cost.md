@@ -67,6 +67,11 @@
 - 对一行(ts, model, 三桶 token):取该 model 下 `effectiveFrom <= ts` 的最新一条;一条都没有则回退该 model 最早一条(记为回退,覆盖「起始时间未公告」的时段)。再判 `peakPrices` 是否存在且 ts 落在北京高峰窗口 → 用峰价。
 - **cost = input×inputPerMTok + cacheRead×cacheHitPerMTok + output×outputPerMTok** ÷ 1M(元)。
 - **cost 只即时计算**(面板 dashboard-get 与 `/lmemory usage` 每次重算),任何组件不写 cost 到磁盘——价格表是唯一持久化事实。
+- **提升评审预估**(`estimatePromoteCost`,global-layer-design.md §7.3):输入按
+  `nodeCount × maxNodeKb × 1024 字符` 估 token(满容量假设),输出按
+  `nodeCount × GLOBAL_PROMOTE_MAX 条 × 150 字符` 估(逐节点输出上限近似),
+  逐节点用 `costFor` 计价(线性可合并为一次调用),模型 = `reviewModel`(v4-pro),
+  与 usage 行 label='review' 回退语义一致。假设写死在函数 JSDoc,非运行时可变。
 
 ### 展示
 

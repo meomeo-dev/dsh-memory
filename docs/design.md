@@ -50,10 +50,10 @@ DeepSeek Harness 已有 `session-reference`(整段历史会话的有界引用),�
 ```
 
 - 每个层级目录下,记忆按命名规范(见 concept.md §7)分文件:`YYYY-MM-DD[.<partition>].<type>.remember.{jsonl,md}`。
-- 项目根由 `.git` 标记向上探测。
+- 项目根由 `.git` 标记向上探测(realpath 归一为 canonical workspace 根,见 global-layer-design.md §6.2;worktree 的 `.git` 是文件,同样命中 → 每个 worktree 是独立 workspace)。
 - 文件按「日期 + 分区 + 类型」天然可分片,正是记忆节点分区的依据。
 
-**写根**:`remember` 按 `layer` 参数决定写 `~/.dsh/lmemory/`(user)或 `<repo>/.dsh/lmemory/`(project)。`scope`(影响范围)是自由文本,不决定落点。
+**写根**:`remember` 按 `layer` 参数决定写 `~/.dsh/lmemory/`(user)、`<repo>/.dsh/lmemory/`(project)或 `~/.dsh/lmemory/global/`(global,仅 gated 路径)。`scope`(影响范围)是自由文本,不决定落点。
 
 ## 5. 数据模型
 
@@ -141,9 +141,10 @@ interface MemoryEntry {
 
 | 工具 | 参数 | 行为 |
 |---|---|---|
-| `remember` | `type` / `domain` / `scope`(影响范围)/ `layer`(落点层)/ `entry` / `entryPoint?` / `references?` | 校验枚举 → 追加 JSONL 行 → 重渲染 MD;`rules` 只增不减 |
-| `recall` | `query` | fan-out 到记忆节点 team → 聚合返回相关条目 |
+| `remember` | `type` / `domain` / `scope`(影响范围)/ `layer`(落点层,只收 user/project)/ `entry` / `entryPoint?` / `references?` | 校验枚举 → 追加 JSONL 行 → 重渲染 MD;`rules` 只增不减(global 层由 gated 路径写入,见 global-layer-design.md G1) |
+| `recall` | `query` | fan-out 到记忆节点 team → 聚合返回相关条目(召回面含 global 目录) |
 | `forget` | `entry`(精确匹配)/ `type?` / `confirm?` | **遍历全部可见文件**按 entry 匹配删除(条目可能不在当天文件)→ 重写受影响 jsonl+md;`rules` 删除须 `confirm: true`,`type` 可限定类型 |
+| `memory-find` / `memory-update` / `memory-delete` | 按 id 过滤 / 改写 / 删除 | layer 过滤保留三层(global 可被按层查到) |
 
 **提取原则由模型执行**:`remember` 的 description 写入「只记 rules/lessons 两类,禁止流水账/思考过程/代码实现/凭据」(来自 concept.md §4)。
 
@@ -159,6 +160,7 @@ interface MemoryEntry {
 | `/lmemory query <text>` | 人主动查询长期记忆(fan-out 同 recall) |
 | `/lmemory config get` / `set <key> <value>` | 读写配置项(见 §9) |
 | `/lmemory ui` | 返回 Web 面板全部页面的 token 链接(仅 web 模式;见 web-panel.md) |
+| `/lmemory global extract <file> [--dry-run\|--confirm]` / `promote [--confirm]` / `review` | global 记忆入口:文档抽取 / 提升评审 / 质检(见 global-layer-design.md §4/§7/§8) |
 | `/lmemory collections list` / `add` / `forget` / `export` | 记忆根注册表管理(见 storage-and-collections.md) |
 
 > `/lmemory review`(质检,注入主会话)与 `/lmemory catalog rebuild`(重建 catalog)属独立扩展,见 [memory-review.md](memory-review.md) §5 / §3。
@@ -184,7 +186,7 @@ interface MemoryEntry {
 
 > 这是「设计起点的合理集」,开发时按需增删(召回模型、节点并发度等)。
 >
-> 扩展文档另增配置键(同样存 `ctx.settings`,经 `/lmemory config set` 读写):auto-extraction.md §7 增 `autoExtract` / `extractMode` / `extractInterval` / `signalWords` / `extractRulesPrompt` / `extractLessonsPrompt`;memory-review.md §7 增 `reviewModel`。
+> 扩展文档另增配置键(同样存 `ctx.settings`,经 `/lmemory config set` 读写):auto-extraction.md §7 增 `autoExtract` / `extractMode` / `extractInterval` / `signalWords` / `extractRulesPrompt` / `extractLessonsPrompt`;memory-review.md §7 增 `reviewModel`;global-layer-design.md §6.1 增 `summaryMode`(默认 `'global'`:注入只含 global 全文 + user/project domain 计数;`'all'` 恢复旧全量行为)。
 
 ## 10. 验收标准(AC)
 
@@ -215,3 +217,4 @@ interface MemoryEntry {
 - **记忆寻址、目录与质检(Review)** → [memory-review.md](memory-review.md):唯一编号 id、catalog、切 `deepseek-v4-pro` 的 review 质检、`/lmemory review` 闭环、按 id 的 query/update/delete 工具。
 - **数据契约与演进式数据设计** → [data-contract.md](data-contract.md):ER/3NF、`schema/*.schema.yaml` 单一真相源 + codegen、记录级 `schemaVersion`、`migrations/` 迁移引擎(Data + Schema + Migrate 三件套)。
 - **健壮性设计** → [robustness.md](robustness.md):节点容错(per-node 降级)、LLM 停机语义(依赖 LLM fail-fast、纯文件不受影响)、停机只影响 dsh-memory 自身不入侵 dsh。
+- **global 记忆层** → [global-layer-design.md](global-layer-design.md):门禁写入、三泛型 team、注入最小化、workspace canonical 匹配、global 导出/导入防线。

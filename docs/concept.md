@@ -136,11 +136,11 @@ lmemory/YYYY-MM-DD[.<partition>].<memory_type>.remember.{jsonl|md}
 
 | 层(layer) | 落点 | 含义 |
 |---|---|---|
-| Global | 全局 | 跨所有项目生效(几乎不用) |
+| Global | `~/.dsh/lmemory/global/` | host 内跨项目共享,只由 gated 路径写入(见 docs/global-layer-design.md) |
 | User | `~/.dsh/lmemory/` 或 `~/.agents/lmemory/` | 用户级,跨项目 |
 | Project | `<repo>/.dsh/lmemory/` 或 `<repo>/.agents/lmemory/` | 项目级,单仓库 |
 
-写入 JSONL 的 `layer` 字段与工具 `layer` 枚举取**小写 id**:`global` / `user` / `project`(上表首字母大写仅为概念名)。
+写入 JSONL 的 `layer` 字段与工具 `layer` 枚举取**小写 id**:`global` / `user` / `project`(上表首字母大写仅为概念名)。global 目录不在 user/project 发现链内(独立追加到召回/逆查/统计/注入),目录即身份;`remember` 工具的 layer 参数只收 user/project,global 由文档抽取、提升评审、导入、存量迁移四条 gated 路径写入,任何候选必须先过 global gate(跨项目通用性 / 低易变性 / 大小 20–300 字 / 无机密 / 类型合法)。
 
 ## 9. 召回:多 v4-flash 记忆节点 team
 

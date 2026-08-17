@@ -50,6 +50,9 @@ host 级「有哪些记忆根」的真相源。路径固定:`join(dshHome(), 'lm
     { "root": "/Users/x/.dsh/lmemory", "kind": "user",
       "firstSeenAt": 1786000000000, "lastSeenAt": 1786100000000,
       "entries": 0, "files": 0 },
+    { "root": "/Users/x/.dsh/lmemory/global", "kind": "global",
+      "firstSeenAt": 1786000000000, "lastSeenAt": 1786100000000,
+      "entries": 12, "files": 2 },
     { "root": "/Users/x/Downloads/sandbox/.dsh/lmemory", "kind": "project",
       "firstSeenAt": 1786000000000, "lastSeenAt": 1786100000000,
       "entries": 64, "files": 4 }
@@ -57,14 +60,21 @@ host 级「有哪些记忆根」的真相源。路径固定:`join(dshHome(), 'lm
 }
 ```
 
-- **发现策略(不做全盘扫描)**:固定根 = 用户 dsh + 用户 agents(存在才登记);
-  项目根**惰性注册**——apply 启动时登记当前 cwd 的项目根,每次
-  `agent/session-start` 再登记该会话 cwd 的项目根。历史根保留在注册表中:
-  刷新时仍存在的重算 `entries`/`files`/`lastSeenAt`,已消失的保持最后已知
-  计数(供「曾经的记忆根」展示)。
+- **发现策略(不做全盘扫描)**:固定根 = 用户 dsh + 用户 agents + global 目录(存在才登记);
+  项目根**惰性注册**——apply 启动时登记当前 cwd 的项目根(经 canonicalProjectRoot
+  realpath 归一),每次 `agent/session-start` 再登记该会话 cwd 的项目根。历史根保留
+  在注册表中:刷新时仍存在的重算 `entries`/`files`/`lastSeenAt`,已消失的保持最后
+  已知计数(供「曾经的记忆根」展示)。
+- **存量根 canonical 合并**(global-layer-design.md §6.2):刷新时对存量 project 根
+  realpath 归一建映射,同一物理项目经 symlink 与真实路径各登记一次时合并为一条
+  (root 改写为 canonical 路径、firstSeenAt 取最早、更新计数);已消失的根不做 realpath。
+- **kind 与降级**:kind 枚举为 `'user' | 'project' | 'global'`;formatVersion 保持 1。
+  旧版 dsh-memory 读新 registry.json 会静默丢弃 kind='global' 的根并在其下一次 refresh
+  时抹除登记,**数据本身(global 目录)不受影响**,新版 refresh 自动重登记——该行为与
+  parseRegistry「未知 kind 跳过」的既有契约一致,记录为已接受。
 - **读写**:`src/registry.ts` 纯模块——`loadRegistry`(缺失/损坏 → 空表,不抛)、
   `saveRegistry`(原子:写临时文件后 rename)、`refreshRegistry(cwd?)`(登记 +
-  重算计数)、`forgetRoot(root)`。
+  重算计数 + canonical 合并)、`forgetRoot(root)`。
 - **命令面**:`/lmemory collections list`(刷新并渲染表格:root / kind /
   条目数 / 文件数 / lastSeenAt)、`collections add <root>`(手动登记一个根,
   须含记忆文件或为空目录)、`collections forget <root>`(从注册表移除,不动数据)。

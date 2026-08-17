@@ -71,7 +71,7 @@ interface MemoryEntry {
 
 > **定位方式(实现决策)**:`find` / `update` / `remove` / `forget` 定位记忆时**扫描可见文件 + 惰性迁移**,不读 catalog——catalog 仍被写盘维护,但 store 不依赖它定位。这是对「改查 catalog 定位、不再全量扫描」字面目标的**有意偏离**:jsonl 是真相源,扫描 + 迁移是「总是正确」的路径,不会把 catalog 的滞后(手动编辑 jsonl 后未 rebuild)带进定位;catalog 的职责收缩为「派生索引 + rebuild 一键对齐」,不承担定位职责。因此 design.md §6「forget 遍历全部文件」的盲点修正仍保留,实现改为「扫描 + 迁移」而非「查 catalog」。
 
-**重建兜底**:`/lmemory catalog rebuild` 扫描所有可见 `.remember.jsonl`,重建全部 catalog(手动编辑 jsonl 后的一键对齐;不一致时以 jsonl 为准)。
+**重建兜底**:`/lmemory catalog rebuild` 扫描所有可见 `.remember.jsonl`,重建全部 catalog(手动编辑 jsonl 后的一键对齐;不一致时以 jsonl 为准)。**rebuild 作用域**:默认只重建 cwd 可见的 user/project 层(不触碰 global 目录);`--root <path>` 只重建显式给定的记忆根目录(如 `~/.dsh/lmemory/global`)。
 
 ## 4. 质检(Review)——切 `deepseek-v4-pro`
 
@@ -105,6 +105,8 @@ interface MemoryEntry {
 ```
 
 review **只发现、不自动改**——修正由主 agent 决策后调工具执行(见 §6)。这与「记忆是用户意图的长期沉淀,不可静默改写」的原则一致。
+
+**质检域**:`/lmemory review` 的域是 user/project 可见链(不追加 global 目录);global 质检走 review<global-type1>(`/lmemory global review`,同一 review.ts 骨架、entries 换 global 目录条目,隔离在源拼装层),见 global-layer-design.md §8。
 
 ## 5. review 闭环:slash command → 主会话 → 工具修复
 
@@ -153,6 +155,8 @@ ctx.commands.register({
 - `recall`(语义召回)与 `memory-find`(按 id/条件精确查)互补:recall 回答「和 query 相关的有什么」,memory-find 回答「这条 id 具体是什么、在哪」。
 - `forget`(按 `entry` 文本精确匹配)与 `memory-delete`(按 id)并存:forget 是「不知道 id 时的宽泛删除入口」,memory-delete 是「按 id 的精确删除」。review 修复走 memory-delete(报告带 id)。
 - `remember`(写新)改为同时生成 id 并写 catalog。
+
+> 定位域 = 可见链(不含 global 目录):`memory-update` / `memory-delete` / `forget` 因此天然够不到 global 条目——global v1 只增不改不删(global-layer-design.md §12);`memory-find` 的 `layer` 过滤保留三层(global 条目可被按层查到,如面板与 `/lmemory stats` 的 host 视图)。
 
 > 注:用户需求描述为「2 个工具」,但列出的动作是查询/更新/删除三项。本设计按单一职责拆 3 个;若需压缩为 2 个,可将 `memory-update` + `memory-delete` 合并为一个 `memory-mutate`(带 `operation: 'update' | 'delete'` 枚举),查询仍单列。
 

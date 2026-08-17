@@ -1,14 +1,14 @@
 # Web 面板设计(web-panel)
 
-记忆 Web 面板:web 模式下给用户一个图形界面看记忆、看状态、管理目录、改配置。五个页面 + 一个 RPC 通道,全部注册在 dsh-memory 包内,不依赖 dsh monorepo 改动。
+记忆 Web 面板:web 模式下给用户一个图形界面看记忆、看状态、管理目录、改配置、操作 global 记忆。六个页面 + 一个 RPC 通道,全部注册在 dsh-memory 包内,不依赖 dsh monorepo 改动。
 
 ## 形态与入口
 
 | 项 | 值 |
 |---|---|
-| 页面 | `/memory`(记忆页)、`/memory/status`(状态页)、`/memory/collections`(目录页)、`/memory/nodes`(节点状态页)、`/memory/settings`(设置页) |
+| 页面 | `/memory`(记忆页)、`/memory/status`(状态页)、`/memory/collections`(目录页)、`/memory/nodes`(节点状态页)、`/memory/settings`(设置页)、`/memory/global`(Global 页) |
 | 静态资源 | `/memory-assets/*`(panel.js / style.css,前缀路由) |
-| RPC | `/memory-api` channel(entries / dashboard-get / roots-get / root-add / root-forget / root-export / config-get / config-set / nodes-get 九个端点) |
+| RPC | `/memory-api` channel(entries / dashboard-get / roots-get / root-add / root-forget / root-export / config-get / config-set / nodes-get / global-entries / global-extract / global-promote / global-review / global-export / global-import 十五个端点) |
 | 打开方式 | ① `/lmemory ui` 命令返回可点击链接(主入口);② 启动时打印面板 URL 到 stdout(与 `dsh web:` 行一致) |
 
 URL 恒带 `ac_token`(每次进程启动用 crypto 随机重新生成,64 位 hex);token 不写盘、不跨进程复用。
@@ -29,6 +29,7 @@ GET  /memory/status?ac_token=<t>   → 状态页 HTML 壳(同上)
 GET  /memory/collections?ac_token=<t> → 目录页 HTML 壳(同上)
 GET  /memory/nodes?ac_token=<t>    → 节点状态页 HTML 壳(同上)
 GET  /memory/settings?ac_token=<t> → 设置页 HTML 壳(同上)
+GET  /memory/global?ac_token=<t>  → Global 页 HTML 壳(同上)
 GET  /memory-assets/<file>?ac_token=<t> → 静态资源(白名单后缀 .js/.css/.map/.svg/.png/.woff2,
                                      单段文件名、拒绝 .. 与分隔符,防路径穿越)
 POST /memory-api/entries    { acToken, filters?: { type?, domain?, layer?, query? } }
@@ -46,11 +47,26 @@ POST /memory-api/root-add   { acToken, root } → 校验(含 *.remember.jsonl /
 POST /memory-api/root-forget { acToken, root } → 从 registry 移除(不动磁盘数据)。
 POST /memory-api/root-export { acToken, root? } → 导出全部或单个根到默认导出
   目录(~/dsh-memory-exports);面板不开放任意路径写,CLI --out 保持自由。
-POST /memory-api/config-get { acToken } → { config: [{ key, meta, value }] }(13 键,按 CONFIG_KEYS 顺序)
+POST /memory-api/config-get { acToken } → { config: [{ key, meta, value }] }(14 键,按 CONFIG_KEYS 顺序)
 POST /memory-api/config-set { acToken, patch } → 经 settings scope 校验并 applyConfig,返回写后 config
 POST /memory-api/nodes-get { acToken } → { processes: [ ProcessRow ] }
   节点状态页视图:host 上全部 dsh-memory 进程(状态文件聚合,见 docs/node-status.md);
   读取端标记心跳失效(已退出)并清理 >24h 残留,本进程置顶。
+POST /memory-api/global-entries { acToken } → { entries: [{ entry, file }] }
+  Global 页只读列表:host 级注册表视图经 layer=global 过滤,按 createdAt 降序。
+POST /memory-api/global-extract { acToken, text, confirm?, candidates? } → 两阶段同端点:
+  阶段 1(不带 confirm)返回 { candidates: [带 verdict 的候选] },不写盘;
+  阶段 2(confirm=true + candidates)服务端对每条候选重跑 gate + schema 校验后 append,
+  返回 { wrote, skipped }。客户端 verdict 仅供回显,确认不绕过 gate。
+  文档与导入文本在 RPC 层做 Buffer.byteLength ≤ 1 MiB 硬校验,超限 bad-request。
+POST /memory-api/global-promote { acToken, confirm? } → confirm 缺省返回
+  { plan: { sourceEntries, nodeCount, costYuan? } }(未确认不发调用);
+  confirm=true 执行提升评审并返回 { wrote, skipped }。
+POST /memory-api/global-review { acToken } → { findings, report }(review<global-type1> 缺陷报告全文)
+POST /memory-api/global-export { acToken } → { export: 单文件 JSON 包全文 }
+POST /memory-api/global-import { acToken, text } → 防线链(kind → formatVersion → 逐条
+  migrate → gate → layer=global → 两轮去重 → appendImported),返回
+  { ok, imported, duplicates, skipped, errors } 或防线拒绝 { ok:false, reason }。
 ```
 
 RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload}` / `{type:"server-response",rpcId,result:{ok,value}}`;错误码只用 `bad-request`(载荷/token 非法)与 `internal`(依赖抛错)。
@@ -63,14 +79,15 @@ RPC 信封与 dsh 主 `/api` 相同:`{type:"client-request",rpcId,method,payload
 - **状态页**:三区结构——顶部 team 状态(本进程,各 root 的已预热节点数 + maxNodeKb chip)→ 记忆活动大表(近 24h × 15min,type×domain 组合轴,见 docs/memory-activity.md)→ 中部统计指标块(host 级注册表视图:总条目 / rules / lessons / 各层 / 领域数 / 文件 / jsonl 与 md 体积 / catalog,网格卡片)→ 正文 usage 图表。用量口径统一见 docs/status-page-usage.md:消耗类图表(Token 分布、LLM 调用消耗、用量明细)读 usage.jsonl 按「近 14 天」聚合(host 级、跨进程、跨重启),每日用量柱与日历热力图读同源 84 天日聚合,静态上下文成本标注「本进程」实时装载——甜甜圈合计与每日柱合计数学恒等。用量明细表另带「估算成本 (¥)」列与合计:按 docs/pricing-and-cost.md 的价格表(时段 + 峰谷)即时计算,成本不落盘。图表为纯 SVG/div(零外部图表库,满足 CSP `default-src 'none'`);页面 60s 自动轮询 + 「刷新」按钮重取 `dashboard-get`。
 - **目录页**:展示已登记记忆根及其状态。用户故事:① 一眼看全机记忆根分布(位置/条目/文件/最近活跃);② 展开看文件级明细;③ 手动登记备份拷回的根;④ 移除登记(不动磁盘);⑤ 一键导出全部或单根记忆包。信息结构:页头(标题 + 导出全部)→ 汇总指标(根数/总条目/总文件)→ 登记表单(路径 + 校验)→ 根列表卡片(kind 徽标 / 路径 / 存活状态点 / 条目文件计数 / 首登与最近可见 / 导出·移除登记·文件明细操作)。
 - **节点状态页**:跨进程总览(设计见 docs/node-status.md)。用户故事:多会话并跑时定位卡住/报错的节点、看各进程装载与最近调用健康度、识别崩溃残留。信息结构:进程卡片列表(本进程置顶高亮;已退出沉底置灰),每卡三段——身份带(pid · port · 启动时间 · cwd)、装载带(每 root 预热 team 节点数/体积 + 摘要体积)、节点带(recall/extract/review 三行:状态点 + 运行中指示 + 累计 calls + 最近一次时间/耗时/错误)。5s 自动轮询 + 手动刷新。
-- **设置页**:13 个配置键的表单,按 kind 出控件(number / boolean / enum / string / textarea),统一「保存」提交 config-set,成功/失败横幅反馈。键集合与展示元数据在 `src/web-ui/ui.ts` 的 `PANEL_CONFIG_META`(测试锁定与 `CONFIG_KEYS` 不漂移)。
+- **设置页**:14 个配置键的表单,按 kind 出控件(number / boolean / enum / string / textarea),统一「保存」提交 config-set,成功/失败横幅反馈。键集合与展示元数据在 `src/web-ui/ui.ts` 的 `PANEL_CONFIG_META`(测试锁定与 `CONFIG_KEYS` 不漂移)。
+- **Global 页**(docs/global-layer-design.md §9.1):顶部 global 条目只读列表(复用记忆页卡片形态);动作区四个——① 文档抽取:粘贴/上传文本(≤1MiB)→「抽取」回显候选(verdict 徽标 + 条目文本)→「确认写盘」提交 candidates(服务端重跑 gate);② 提升评审:「预估」先显示源条目数/节点数/预计成本(未确认不发调用),「确认执行」后显示写入/跳过计数;③ global 质检:显示缺陷数与报告全文(pre 纯文本);④ 导出/导入:导出触发浏览器下载单文件 JSON 包;导入选文件后回显 imported/duplicates/skipped 明细或防线拒绝理由。两阶段交互与 CLI 的 --confirm 语义一致(决策 D9)。
 
 ## 代码组织与构建
 
 ```
 src/web-ui/ui.ts           host 侧纯逻辑(不 import cordis):token、URL、HTML 壳、资源防穿越、RPC 分发
 src/web-ui/panel/          React 18 面板应用(vite 构建,React 打进单文件、零 CDN)
-src/web-ui/panel/src/      api.ts(线协议客户端)/ App.tsx(导航壳)/ pages/(五页)/ charts.tsx / format.ts / main.tsx / styles.css
+src/web-ui/panel/src/      api.ts(线协议客户端)/ App.tsx(导航壳)/ pages/(六页)/ charts.tsx / format.ts / main.tsx / styles.css
 src/index.ts               接线:registerPanel(webServer + connection 存在时注册)+ /lmemory ui
 ```
 
@@ -82,5 +99,5 @@ src/index.ts               接线:registerPanel(webServer + connection 存在时
 
 ## 非目标
 
-- 不做记忆条目编辑/删除(条目写仍走模型工具与 /lmemory 命令;面板的写操作限于 config-set 与目录页登记/移除/导出)。
+- 不做记忆条目编辑/删除(条目写仍走模型工具与 /lmemory 命令;面板的写操作限于 config-set、目录页登记/移除/导出与 Global 页的 gated 路径——抽取确认/提升确认/导入,三者服务端重跑 gate)。
 - 不做 LAN 访问(loopback only);不集成进 dsh SPA 布局(独立页,路径 B)。
