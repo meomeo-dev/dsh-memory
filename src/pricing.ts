@@ -14,6 +14,8 @@ import { dirname, join } from 'node:path'
 import { dshHome } from './memory-file.js'
 import { localDay, recentDays } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
+import { GLOBAL_PROMOTE_MAX } from './global-gate.js'
+import { estimateTokens } from './stats.js'
 
 /** 价格表格式版本(结构变化时递增;读取端只认格式,不认识视为损坏)。 */
 export const PRICING_FORMAT_VERSION = 1
@@ -400,4 +402,31 @@ export function estimateHourlyCosts(
       : { ...bucket, yuan: (bucket.yuan ?? 0) + cost }
   }
   return buckets
+}
+
+/**
+ * 估算一次提升评审(global promote)的总成本(元;docs/global-layer-design.md §7.3,决策 D7)。
+ *
+ * 假设(写死在 JSDoc,不在运行时可变):输入 = nodeCount × maxNodeKb × 1024 字符
+ * (满容量节点)、输出 = nodeCount × GLOBAL_PROMOTE_MAX 条 × 150 字符(逐节点输出
+ * 上限近似),均按 chars/4 估 token;逐节点用 costFor 计价(线性可合并为一次调用),
+ * 模型 = config.reviewModel(v4-pro),与 usage 行 label='review' 回退语义一致。
+ * @param table - 价格表。
+ * @param model - 提升评审模型 id。
+ * @param nodeCount - 预计节点数(0 节点无调用,成本 0)。
+ * @param maxNodeKb - 每节点容量上限(Kb)。
+ * @param ts - 估算时刻(epoch 毫秒);缺省当前时间。
+ * @returns 估算成本(元);模型无价格记录返回 undefined。
+ */
+export function estimatePromoteCost(
+  table: PricingTable,
+  model: string,
+  nodeCount: number,
+  maxNodeKb: number,
+  ts: number = Date.now(),
+): number | undefined {
+  if (nodeCount <= 0) return 0
+  const inputTokens = estimateTokens(nodeCount * maxNodeKb * 1024)
+  const outputTokens = estimateTokens(nodeCount * GLOBAL_PROMOTE_MAX * 150)
+  return costFor(table, model, ts, inputTokens, 0, outputTokens)
 }

@@ -146,6 +146,14 @@ describe('append', () => {
     expect(catalog.entries).toHaveLength(1)
     expect(catalog.entries[0]!.layer).toBe('global')
   })
+
+  it('allows a global rules entry with text identical to a user entry (cross-layer is not duplicate)', () => {
+    const first = append(project, candidate())
+    expect(first.duplicate).toBe(false)
+    const global = append(undefined, candidate({ layer: 'global' }))
+    expect(global.duplicate).toBe(false)
+    expect(readAllJsonlLines(visibleGlobalDir())).toHaveLength(1)
+  })
 })
 
 describe('appendImported', () => {

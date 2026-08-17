@@ -2,8 +2,8 @@
  * `/lmemory` 命令的参数解析(纯函数)。
  *
  * 子命令:status / stats / usage [--days N] / ui / team start|stop|restart /
- * query <text> / config get|set / review [layer|domain] / catalog rebuild /
- * collections list|add|forget|export / pricing / help。
+ * query <text> / config get|set / review [layer|domain] / catalog rebuild [--root] /
+ * global extract|promote|review / collections list|add|forget|export / pricing / help。
  * 解析只做词法切分,不校验配置键语义(交给 index.ts 的 handler)。
  * @module dsh-memory/command
  */
@@ -29,6 +29,13 @@ export type LmemoryCommand =
   | { readonly kind: 'config-set'; readonly key: string; readonly value: string }
   | { readonly kind: 'review'; readonly filter?: ReviewFilter }
   | { readonly kind: 'catalog'; readonly root?: string }
+  | {
+    readonly kind: 'global'
+    readonly action: 'extract' | 'promote' | 'review'
+    readonly file?: string
+    readonly dryRun?: boolean
+    readonly confirm?: boolean
+  }
   | { readonly kind: 'pricing' }
   | {
     readonly kind: 'collections'
@@ -39,7 +46,7 @@ export type LmemoryCommand =
   }
 
 /** 命令用法回显文案。 */
-export const USAGE = 'Usage: /lmemory status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild [--root <path>] | collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...] | pricing | help [command]'
+export const USAGE = 'Usage: /lmemory status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild [--root <path>] | global extract <file> [--dry-run|--confirm] | global promote [--confirm] | global review | collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...] | pricing | help [command]'
 
 /** 一条子命令的帮助详情(供 `/lmemory help [command]`)。 */
 export interface CommandHelp {
@@ -118,6 +125,18 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
       '--root <path>:只重建给定记忆根目录(显式指定即重建,含 global 目录;docs/global-layer-design.md §5.5)。',
       '示例:/lmemory catalog rebuild',
       '示例:/lmemory catalog rebuild --root ~/.dsh/lmemory/global',
+    ],
+  }],
+  ['global', {
+    usage: 'global extract <file> [--dry-run|--confirm] | promote [--confirm] | review',
+    summary: 'global 记忆入口:文档抽取 / 提升评审 / 质检(docs/global-layer-design.md)。',
+    details: [
+      'extract <file>:读本地文档(≤1MiB)交 extract<global-type1> 小队抽取,回显候选 + gate 结论;--dry-run 只回显不写盘;--confirm 命中暂存零调用写盘,否则重跑管线写盘。',
+      'promote:review<global-type2> 小队对全部 user/project 记忆严格评估并总结提炼为 global 候选;先回显预估节点数与成本,--confirm 才执行(未确认不发调用)。',
+      'review:review<global-type1> 小队质检 global 目录条目,报告注入主会话。',
+      '相对路径:文档路径相对进程工作目录;global 条目的 entryPoint/references 相对来源 workspace 根解释。',
+      '示例:/lmemory global extract ~/docs/guide.md --dry-run',
+      '示例:/lmemory global promote --confirm',
     ],
   }],
   ['pricing', {
@@ -227,6 +246,26 @@ export function parseLmemoryCommand(rawInput: string): LmemoryCommand {
       return { kind: 'catalog', root: parts.slice(3).join(' ') }
     }
     return { kind: 'catalog' }
+  }
+  if (head === 'global') {
+    const action = parts[1]?.toLowerCase()
+    const flags = parts.slice(2).filter(part => part.startsWith('--'))
+    if (action === 'extract') {
+      const file = parts.slice(2).filter(part => !part.startsWith('--')).join(' ')
+      if (file.length === 0) return { kind: 'help' }
+      return {
+        kind: 'global',
+        action: 'extract',
+        file,
+        ...(flags.includes('--dry-run') ? { dryRun: true } : {}),
+        ...(flags.includes('--confirm') ? { confirm: true } : {}),
+      }
+    }
+    if (action === 'promote') {
+      return { kind: 'global', action: 'promote', ...(flags.includes('--confirm') ? { confirm: true } : {}) }
+    }
+    if (action === 'review') return { kind: 'global', action: 'review' }
+    return { kind: 'help' }
   }
   if (head === 'pricing' && parts.length === 1) {
     return { kind: 'pricing' }

@@ -252,8 +252,8 @@ function locate(cwd: string | undefined, id: MemoryId): {
  *
  * `rules` 只增不减(重复 `entry` 拒绝,返回 `duplicate: true` 不落盘);`lessons`
  * 单条 ≤300 字。写根由 `entry.layer` 决定(global → global 根,project → 项目根,user → 用户根)。
- * rules 去重兜底走可见链(不含 global 目录)——global 写入方的去重由调用方(gated 路径)承担,
- * docs/global-layer-design.md §5.3。
+ * rules 去重兜底走可见链(不含 global 目录)且**跳过 layer=global 的写入**——global 的
+ * 去重由 gated 路径承担,跨层逐字相同不算重复,docs/global-layer-design.md §5.3 ①②。
  * @param cwd - 当前工作目录(project 层需要;global/user 可为 undefined)。
  * @param candidate - 候选条目(无 `id` / `createdAt`)。
  * @returns 落盘结果(含 id 与路径)或重复拒绝标记。
@@ -262,7 +262,7 @@ function locate(cwd: string | undefined, id: MemoryId): {
 export function append(cwd: string | undefined, candidate: MemoryEntryInput): AppendResult {
   const entry = validateEntry({ ...candidate, id: generateMemoryId(), schemaVersion: SCHEMA_VERSION, createdAt: Date.now() })
   assertEntryConstraints(entry)
-  if (entry.type === 'rules') {
+  if (entry.type === 'rules' && entry.layer !== 'global') {
     const duplicate = loadAllMigrating(cwd).flatMap(file => file.entries)
       .some(existing => existing.type === 'rules' && existing.entry === entry.entry)
     if (duplicate) return { entry, duplicate: true }

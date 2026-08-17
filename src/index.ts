@@ -17,7 +17,7 @@
  * @module @meomeo-dev/dsh-memory
  */
 
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -35,7 +35,7 @@ import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-client-connection'
 
 import { DOMAINS } from './schema.js'
-import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
+import type { DomainId, LayerId, MemoryEntry, MemoryEntryInput, MemoryType } from './schema.js'
 import { formatCreatedAt, renderMemorySummary } from './render.js'
 import { builtinMemoryDir, discoverEntries, discoverGlobalEntries, migrateLegacyGlobalEntries, migrateLegacyMemoryDirs, resolveRecalled, visibleGlobalDir } from './memory-file.js'
 import type { RecalledEntry } from './memory-file.js'
@@ -79,7 +79,20 @@ import { computeStats, computeStatsIn, EMPTY_USAGE, estimateTokens, recordUsage 
 import type { UsageCounter } from './stats.js'
 import { aggregateByDay, aggregateByHour, aggregateWindowTotals, appendUsageRow, readUsageRows } from './usage-log.js'
 import type { UsageLogRow } from './usage-log.js'
-import { costFor, estimateDailyCosts, estimateHourlyCosts, estimateWindowCosts, loadPricing, pricingPath } from './pricing.js'
+import { costFor, estimateDailyCosts, estimateHourlyCosts, estimatePromoteCost, estimateWindowCosts, loadPricing, pricingPath } from './pricing.js'
+import {
+  checkGlobalGate,
+  GLOBAL_DOC_MAX_BYTES,
+  GLOBAL_EXTRACT_LESSONS_SYSTEM,
+  GLOBAL_EXTRACT_RULES_SYSTEM,
+  GLOBAL_PROMOTE_SYSTEM,
+  globalExtractSources,
+  promoteSourceEntries,
+  resolvePromotePlan,
+  runGlobalExtractFanOut,
+  runGlobalPromoteFanOut,
+} from './global-gate.js'
+import type { GlobalCandidate } from './global-gate.js'
 import { aggregateEntryActivity } from './memory-activity.js'
 import {
   RUNTIME_HEARTBEAT_MS,
@@ -163,6 +176,8 @@ interface Runtime {
   port?: number
   /** 面板不可用原因(web 模式但 dist 缺失等;供 `/lmemory ui` 给出准确文案)。 */
   panelError?: string
+  /** global extract 两阶段暂存(进程内;--confirm 命中同 key 零调用写盘,决策 D9)。 */
+  globalStaged?: { key: string; candidates: readonly GlobalCandidate[] }
 }
 
 /** remember 工具的规范化输出。 */
@@ -380,8 +395,19 @@ async function doReview(
   let entries = discoverEntries(cwd)
   if (filter?.kind === 'layer') entries = entries.filter(entry => entry.layer === filter.value)
   else if (filter?.kind === 'domain') entries = entries.filter(entry => entry.domain === filter.value)
-  if (entries.length === 0) return []
+  return reviewEntries(ctx, runtime, entries)
+}
 
+/**
+ * 在给定条目集上执行 review 质检(user/project 域经 {@link doReview} 注入可见链,
+ * global 域经 review<global-type1> 注入 global 目录条目;review.ts 零改动复用)。
+ * @param ctx - 插件上下文。
+ * @param runtime - 运行时状态。
+ * @param entries - 质检域条目。
+ * @returns 缺陷发现。
+ */
+async function reviewEntries(ctx: Context, runtime: Runtime, entries: MemoryEntry[]): Promise<ReviewFinding[]> {
+  if (entries.length === 0) return []
   const team = reviewTeam(entries, runtime.config.maxNodeKb)
   const knownIds = new Set(entries.map(entry => entry.id))
 
@@ -939,6 +965,47 @@ function summaryText(config: MemoryConfig, cwd: string | undefined): string {
   return renderMemorySummary([...discoverEntries(cwd), ...discoverGlobalEntries()], config.summaryMode)
 }
 
+/** 读取文档文本并做 1 MiB 硬上限与空文档校验(GLOBAL_DOC_MAX_BYTES;docs/global-layer-design.md §4.1)。 */
+function readDocumentFile(path: string): string {
+  const text = readFileSync(path, 'utf8')
+  if (Buffer.byteLength(text, 'utf8') > GLOBAL_DOC_MAX_BYTES) {
+    throw new Error(`global extract: document exceeds the ${GLOBAL_DOC_MAX_BYTES / 1024 / 1024} MiB limit`)
+  }
+  if (text.trim().length === 0) throw new Error('global extract: document is empty')
+  return text
+}
+
+/**
+ * global 写盘(三条 gated 路径共用):确定性 gate 硬查 → 与现有 global 条目按
+ * entry 精确去重(rules/lessons 都去重)→ append(global 根,内部 schema 校验)。
+ * 确认阶段的服务端重跑不绕过 gate(§7.1、G1)。
+ * @param candidates - 待写候选(含 verdict,写盘只看 gate 硬查)。
+ * @returns 写盘结果文案。
+ */
+function writeGlobalCandidates(candidates: readonly GlobalCandidate[]): string {
+  const existing = new Set(discoverGlobalEntries().map(entry => entry.entry))
+  const pending = candidates.filter(candidate => checkGlobalGate(candidate).pass && !existing.has(candidate.entry))
+  const skipped = candidates.length - pending.length
+  for (const candidate of pending) {
+    append(undefined, { ...candidate, layer: 'global' })
+  }
+  if (pending.length > 0) rebuild(undefined, [visibleGlobalDir()])
+  return skipped > 0
+    ? `wrote ${pending.length} global entr(ies), skipped ${skipped} (gate reject or duplicate).`
+    : `wrote ${pending.length} global entr(ies).`
+}
+
+/** global extract 回显:每条候选 + 确定性 gate 结论(§4.1)。 */
+function renderGlobalExtractEcho(file: string, candidates: readonly GlobalCandidate[]): string {
+  if (candidates.length === 0) return `global extract from ${file}: 0 candidates (nothing to write).`
+  const lines = candidates.map((candidate) => {
+    const gate = checkGlobalGate(candidate)
+    const conclusion = gate.pass ? 'pass' : `reject: ${gate.reason}`
+    return `- [${candidate.type}|${candidate.domain}] ${candidate.entry} — gate ${conclusion}`
+  })
+  return [`global extract from ${file}: ${candidates.length} candidate(s)`, ...lines, 'run with --confirm to write.'].join('\n')
+}
+
 /** 执行一次 `/lmemory` 命令。 */
 async function handleCommand(
   ctx: Context,
@@ -1031,6 +1098,65 @@ async function handleCommand(
         rebuild(cwd, command.root !== undefined ? [resolve(command.root)] : undefined)
         return { kind: 'success', text: 'catalog rebuilt from jsonl.' }
       }
+      case 'global': {
+        switch (command.action) {
+          case 'extract': {
+            const text = readDocumentFile(command.file!)
+            const key = resolve(command.file!)
+            const staged = runtime.globalStaged
+            // --confirm 命中暂存:零调用直接写盘(决策 D9;gate 在写盘侧重跑,不绕过)。
+            if (command.confirm && !command.dryRun && staged !== undefined && staged.key === key) {
+              runtime.globalStaged = undefined
+              return { kind: 'success', text: writeGlobalCandidates(staged.candidates) }
+            }
+            const candidates = await runGlobalExtractFanOut(
+              globalExtractSources(text, runtime.config.maxNodeKb * 1000),
+              async chunk => callFlash(ctx, runtime, GLOBAL_EXTRACT_RULES_SYSTEM, `文档片段:\n${chunk}`, 'extract', runtime.config.model),
+              async chunk => callFlash(ctx, runtime, GLOBAL_EXTRACT_LESSONS_SYSTEM, `文档片段:\n${chunk}`, 'extract', runtime.config.model),
+              (type, error) => warnNode(ctx, `global-extract ${type}`, error),
+            )
+            const echo = renderGlobalExtractEcho(command.file!, candidates)
+            if (command.dryRun) return { kind: 'success', text: echo }
+            runtime.globalStaged = { key, candidates }
+            if (command.confirm) {
+              runtime.globalStaged = undefined
+              return { kind: 'success', text: `${echo}\n${writeGlobalCandidates(candidates)}` }
+            }
+            return { kind: 'success', text: echo }
+          }
+          case 'promote': {
+            const entries = promoteSourceEntries()
+            const plan = resolvePromotePlan(entries, runtime.config.maxNodeKb)
+            const pricing = loadPricing()
+            const cost = pricing.ok
+              ? estimatePromoteCost(pricing.table, runtime.config.reviewModel, plan.nodeCount, runtime.config.maxNodeKb)
+              : undefined
+            const head = `global promote plan: ${entries.length} source entr(ies) -> ${plan.nodeCount} node(s); estimated cost ${cost === undefined ? 'unknown (pricing unavailable)' : `¥${cost.toFixed(2)}`}`
+            if (!command.confirm) {
+              return { kind: 'success', text: `${head}\nrun with --confirm to execute (no LLM calls were made).` }
+            }
+            const candidates = await runGlobalPromoteFanOut(
+              entries,
+              runtime.config.maxNodeKb,
+              async node => callFlash(ctx, runtime, GLOBAL_PROMOTE_SYSTEM, `记忆条目:\n${node.text}`, 'review', runtime.config.reviewModel),
+              (nodeId, error) => warnNode(ctx, `global-promote ${nodeId}`, error),
+            )
+            return { kind: 'success', text: `${head}\n${writeGlobalCandidates(candidates)}` }
+          }
+          case 'review': {
+            const findings = await reviewEntries(ctx, runtime, discoverGlobalEntries())
+            const report = renderReviewReport(findings)
+            invocation.agent.followup(createUserMessage({
+              source: { kind: 'plugin', plugin: 'dsh-memory', form: 'notice', summary: `global 记忆质检:发现 ${findings.length} 处缺陷` },
+              content: [{ type: 'text', text: report }],
+            }))
+            return { kind: 'success', text: `global review 完成,发现 ${findings.length} 处,报告已注入会话` }
+          }
+          /* v8 ignore next 2 -- closed union backstop */
+          default:
+            return { kind: 'error', text: USAGE }
+        }
+      }
       case 'pricing': {
         return { kind: 'success', text: renderPricing(loadPricing()) }
       }
@@ -1102,7 +1228,7 @@ function registerTools(ctx: Context, runtime: Runtime): void {
       type: { type: 'string', required: true, enum: ['rules', 'lessons'], description: 'Memory type: rules or lessons.' },
       domain: { type: 'string', required: true, enum: [...DOMAINS], description: 'Knowledge domain (one of 21 ids).' },
       scope: { type: 'string', required: true, description: 'Impacted scope: which subsystem or module this memory affects (free text, e.g. "全项目", "Web UI", "Provider 接入").' },
-      layer: { type: 'string', required: true, enum: ['global', 'user', 'project'], description: 'Storage layer: project writes under the repo, user under ~/.dsh.' },
+      layer: { type: 'string', required: true, enum: ['user', 'project'], description: 'Storage layer: project writes under the repo, user under ~/.dsh. (global memories are written only via /lmemory global or import.)' },
       entry: { type: 'string', required: true, description: 'One-sentence entry text.' },
       entryPoint: { type: 'string', description: 'Associated entry-point file path, or omit.' },
       references: { type: 'string', description: 'Associated reference file path, or omit.' },
@@ -1442,8 +1568,8 @@ export function apply(ctx: Context): void {
 
     ctx.commands.register({
       name: 'lmemory',
-      description: 'manage long-term memory (status / stats / usage / ui / team / query / config / review / catalog / collections / pricing)',
-      input: { hint: 'status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild [--root <path>] | collections list|add|forget|export | pricing | help [command]' },
+      description: 'manage long-term memory (status / stats / usage / ui / team / query / config / review / catalog / global / collections / pricing)',
+      input: { hint: 'status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild [--root <path>] | global extract <file> [--dry-run|--confirm] | global promote [--confirm] | global review | collections list|add|forget|export | pricing | help [command]' },
       handler: invocation => handleCommand(ctx, runtime, scope, invocation),
     })
 

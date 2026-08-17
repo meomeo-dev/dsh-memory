@@ -90,6 +90,20 @@ describe('parseLmemoryCommand', () => {
     expect(parseLmemoryCommand('catalog rebuild --root /Users/me/My Project/.dsh/lmemory')).toEqual({ kind: 'catalog', root: '/Users/me/My Project/.dsh/lmemory' })
     expect(parseLmemoryCommand('catalog rebuild --root')).toEqual({ kind: 'catalog' })
   })
+
+  it('parses the three global subcommands with boolean flags outside the file path', () => {
+    expect(parseLmemoryCommand('global extract ~/docs/guide.md')).toEqual({ kind: 'global', action: 'extract', file: '~/docs/guide.md' })
+    expect(parseLmemoryCommand('global extract ~/docs/guide.md --dry-run')).toEqual({ kind: 'global', action: 'extract', file: '~/docs/guide.md', dryRun: true })
+    expect(parseLmemoryCommand('global extract ~/docs/guide.md --confirm')).toEqual({ kind: 'global', action: 'extract', file: '~/docs/guide.md', confirm: true })
+    // 词法解析按空白切分、原样拼接(不处理 shell 引号);带空格路径由多 token 拼接。
+    expect(parseLmemoryCommand('global extract My Docs/guide.md --dry-run --confirm')).toEqual({ kind: 'global', action: 'extract', file: 'My Docs/guide.md', dryRun: true, confirm: true })
+    expect(parseLmemoryCommand('global promote')).toEqual({ kind: 'global', action: 'promote' })
+    expect(parseLmemoryCommand('global promote --confirm')).toEqual({ kind: 'global', action: 'promote', confirm: true })
+    expect(parseLmemoryCommand('global review')).toEqual({ kind: 'global', action: 'review' })
+    expect(parseLmemoryCommand('global')).toEqual({ kind: 'help' })
+    expect(parseLmemoryCommand('global bogus')).toEqual({ kind: 'help' })
+    expect(parseLmemoryCommand('global extract')).toEqual({ kind: 'help' })
+  })
 })
 
 describe('renderHelp', () => {
@@ -116,8 +130,8 @@ describe('renderHelp', () => {
   })
 
   it('has a help entry for every parseable subcommand head', () => {
-    // status / stats / usage / ui / team / query / config / review / catalog / collections / help 全部可查。
-    for (const topic of ['status', 'stats', 'usage', 'ui', 'team', 'query', 'config', 'review', 'catalog', 'collections', 'help']) {
+    // status / stats / usage / ui / team / query / config / review / catalog / global / collections / help 全部可查。
+    for (const topic of ['status', 'stats', 'usage', 'ui', 'team', 'query', 'config', 'review', 'catalog', 'global', 'collections', 'help']) {
       expect(COMMAND_HELPS.has(topic)).toBe(true)
     }
   })

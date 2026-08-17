@@ -7,6 +7,7 @@ import {
   costFor,
   estimateDailyCosts,
   estimateHourlyCosts,
+  estimatePromoteCost,
   estimateWindowCosts,
   isPeakBeijing,
   loadPricing,
@@ -198,5 +199,24 @@ describe('pricing.json load', () => {
     expect(loadPricing(0).ok).toBe(false)
     writeFileSync(pricingPath(), JSON.stringify({ formatVersion: 1, currency: 'CNY', updatedAt: 0, periods: [{ model: 'x', effectiveFrom: 0, source: 's', prices: { inputPerMTok: -1, cacheHitPerMTok: 0, outputPerMTok: 0 } }] }), 'utf8')
     expect(loadPricing(0).ok).toBe(false)
+  })
+})
+
+describe('estimatePromoteCost', () => {
+  it('prices full-capacity input and per-node output assumptions per the D7 contract', () => {
+    const table = seedPricing(0)
+    // 非高峰时刻(北京 08:59):v4-pro 空闲价 4.5 / 0.15 / 13.5。
+    const ts = Date.UTC(2026, 7, 17, 0, 59)
+    // 输入 = 2 × 600Kb × 1024 字符 = 1,228,800 → 307,200 tokens;
+    // 输出 = 2 × 10 条 × 150 字符 = 3,000 → 750 tokens。
+    const expected = (307_200 * 4.5 + 750 * 13.5) / 1_000_000
+    expect(estimatePromoteCost(table, 'deepseek-v4-pro', 2, 600, ts)).toBeCloseTo(expected, 8)
+  })
+
+  it('returns 0 for an empty plan and undefined for a missing model price', () => {
+    const table = seedPricing(0)
+    const ts = Date.UTC(2026, 7, 17, 0, 59)
+    expect(estimatePromoteCost(table, 'deepseek-v4-pro', 0, 600, ts)).toBe(0)
+    expect(estimatePromoteCost(table, 'unknown-model', 2, 600, ts)).toBeUndefined()
   })
 })
