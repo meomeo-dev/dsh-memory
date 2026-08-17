@@ -251,13 +251,15 @@ function locate(cwd: string | undefined, id: MemoryId): {
  * 写入一条新记忆:校验 + 生成 id + 系统赋值 createdAt + 去重 + 追加 JSONL + 重渲染 MD + 更新 catalog。
  *
  * `rules` 只增不减(重复 `entry` 拒绝,返回 `duplicate: true` 不落盘);`lessons`
- * 单条 ≤300 字。写根由 `entry.layer` 决定(project → 项目根,否则用户根)。
- * @param cwd - 当前工作目录(用于解析写根与可见目录去重)。
+ * 单条 ≤300 字。写根由 `entry.layer` 决定(global → global 根,project → 项目根,user → 用户根)。
+ * rules 去重兜底走可见链(不含 global 目录)——global 写入方的去重由调用方(gated 路径)承担,
+ * docs/global-layer-design.md §5.3。
+ * @param cwd - 当前工作目录(project 层需要;global/user 可为 undefined)。
  * @param candidate - 候选条目(无 `id` / `createdAt`)。
  * @returns 落盘结果(含 id 与路径)或重复拒绝标记。
  * @throws 当 schema 校验失败、entry 空白、lessons 超长、或渲染 MD 未通过静态检查。
  */
-export function append(cwd: string, candidate: MemoryEntryInput): AppendResult {
+export function append(cwd: string | undefined, candidate: MemoryEntryInput): AppendResult {
   const entry = validateEntry({ ...candidate, id: generateMemoryId(), schemaVersion: SCHEMA_VERSION, createdAt: Date.now() })
   assertEntryConstraints(entry)
   if (entry.type === 'rules') {
@@ -382,13 +384,63 @@ export function findIn(dirs: readonly string[], query: FindQuery): FoundEntry[] 
  * 迁移),以 jsonl 为准全量重写 catalog(不一致时 jsonl 权威)。手动编辑 jsonl 后的一键对齐。
  *
  * 内置层只读:它是随包发布、可能在只读安装目录里的种子数据,不在重建范围;
- * 用户层与项目层照常重建。
+ * 用户层与项目层照常重建。默认范围 = 可见链(不含 global 子目录,默认不触碰 global);
+ * 显式 `dirs` 提供时只重建给定目录(显式指定即重建,不做内置层跳过)——
+ * `/lmemory catalog rebuild --root ~/.dsh/lmemory/global` 只重建 global 目录
+ * (docs/global-layer-design.md §5.3)。
  * @param cwd - 当前工作目录;缺省只重建用户级。
+ * @param dirs - 显式重建目标目录(可含 global 目录);缺省走可见链。
  */
-export function rebuild(cwd?: string): void {
-  for (const dir of visibleMemoryDirs(cwd)) {
-    if (dir === builtinMemoryDir()) continue
+export function rebuild(cwd?: string, dirs?: readonly string[]): void {
+  for (const dir of dirs ?? visibleMemoryDirs(cwd)) {
+    if (dirs === undefined && dir === builtinMemoryDir()) continue
     if (!existsSync(dir)) continue
     writeCatalog(dir, loadDirMigrating(dir))
   }
+}
+
+/** `appendImported` 的结果(global 导入专用,docs/global-layer-design.md §9.3)。 */
+export interface AppendImportedResult {
+  /** 实际写入的条目数。 */
+  readonly imported: number
+  /** 因 id 冲突(同 id 异 entry)或同 id 同 entry 跳过、未写入的条目数。 */
+  readonly duplicates: number
+}
+
+/**
+ * 导入 global 条目:保留原 id / createdAt / schemaVersion(不走 {@link append}
+ * 的 id/createdAt 生成),写入导入当天文件,同 id 冲突计 duplicates 跳过
+ * (决策 D4/D5,docs/global-layer-design.md §9.3 步骤 6)。
+ * @param globalRoot - global 目录绝对路径。
+ * @param entries - 已过防线校验(逐条 migrateRecord + gate + layer=global)的条目。
+ * @returns 导入结果。
+ */
+export function appendImported(globalRoot: string, entries: readonly MemoryEntry[]): AppendImportedResult {
+  if (entries.length === 0) return { imported: 0, duplicates: 0 }
+  const byType = new Map<MemoryType, MemoryEntry[]>()
+  for (const entry of entries) {
+    const list = byType.get(entry.type) ?? []
+    list.push(entry)
+    byType.set(entry.type, list)
+  }
+  let imported = 0
+  let duplicates = 0
+  for (const [type, batch] of byType) {
+    const { jsonlPath, mdPath } = todayPaths(globalRoot, type)
+    const { entries: existing } = readFileMigrating(jsonlPath)
+    const knownIds = new Set(existing.map(entry => entry.id))
+    const toWrite = [...existing]
+    for (const entry of batch) {
+      if (knownIds.has(entry.id)) {
+        duplicates += 1
+        continue
+      }
+      knownIds.add(entry.id)
+      toWrite.push(entry)
+      imported += 1
+    }
+    writeFilePair(jsonlPath, mdPath, toWrite)
+  }
+  writeCatalog(globalRoot, loadDirMigrating(globalRoot))
+  return { imported, duplicates }
 }

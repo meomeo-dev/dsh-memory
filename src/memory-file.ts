@@ -16,12 +16,13 @@
  * @module dsh-memory/memory-file
  */
 
-import { existsSync, readdirSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readJsonlMigrating } from './migrate.js'
-import type { MemoryEntry } from './schema.js'
+import { readJsonlMigrating, serializeEntry } from './migrate.js'
+import { renderMd } from './render.js'
+import type { MemoryEntry, MemoryType } from './schema.js'
 import { parseRecallLine } from './team.js'
 
 /** 内置记忆目录(包内 `lmemory/`);无内容时不存在,发现时跳过。 */
@@ -94,7 +95,7 @@ export function migrateLegacyMemoryDirs(cwd?: string): LegacyMigrationReport {
   migrateLegacyDir(dshHome(), report)
   migrateLegacyDir(agentsHome(), report)
   if (cwd !== undefined) {
-    const root = findProjectRoot(cwd)
+    const root = canonicalProjectRoot(cwd)
     migrateLegacyDir(join(root, '.dsh'), report)
     migrateLegacyDir(join(root, '.agents'), report)
   }
@@ -112,6 +113,22 @@ export function findProjectRoot(cwd: string): string {
   }
 }
 
+/**
+ * 项目根的 canonical 形态:realpath 解析 symlink(路径已消失时回退词法路径)。
+ * 写根 / 发现 / team 缓存键 / registry 登记统一用它锚定同一物理 workspace
+ * (docs/global-layer-design.md §6.2.1);固定用户根豁免 realpath(避免 macOS
+ * `/tmp → /private/tmp` 与 DSH_HOME symlink 的连带变更)。
+ * @param cwd - 当前工作目录。
+ * @returns canonical 项目根绝对路径。
+ */
+export function canonicalProjectRoot(cwd: string): string {
+  try {
+    return realpathSync(findProjectRoot(cwd))
+  } catch {
+    return findProjectRoot(cwd)
+  }
+}
+
 /** 一个记忆文件(真相源 jsonl 与其渲染投影 md,同 basename 配对)。 */
 export interface MemoryFile {
   /** `.remember.jsonl` 路径。 */
@@ -122,44 +139,58 @@ export interface MemoryFile {
   readonly entries: readonly MemoryEntry[]
 }
 
-/** 用户级写根与项目级写根。 */
+/** global 记忆目录(用户 dsh 根内的子目录;仅 dsh home 一份,docs/global-layer-design.md §5.1)。 */
+export function visibleGlobalDir(): string {
+  return join(dshHome(), 'lmemory', 'global')
+}
+
+/** 用户级写根、项目级写根与 global 写根。 */
 export interface MemoryWriteRoots {
   /** 用户级写根(`~/.dsh/lmemory`)。 */
   readonly user: string
-  /** 项目级写根(`<repo>/.dsh/lmemory`)。 */
+  /** 项目级写根(`<repo>/.dsh/lmemory`);cwd 不可得时为空串(project 写入必须有 cwd)。 */
   readonly project: string
+  /** global 写根(`~/.dsh/lmemory/global`,与 cwd 无关)。 */
+  readonly global: string
 }
 
-/** 解析写根(dsh 规范目录优先)。 */
-export function memoryWriteRoots(cwd: string): MemoryWriteRoots {
-  // 写根解析同样先做旧目录一次性迁移(幂等)。
+/** 解析写根(dsh 规范目录优先);项目根经 canonical 化锚定同一物理 workspace。 */
+export function memoryWriteRoots(cwd: string | undefined): MemoryWriteRoots {
+  // 写根解析同样先做旧目录一次性迁移(幂等)与存量 global 条目迁移。
   migrateLegacyMemoryDirs(cwd)
+  migrateLegacyGlobalEntries()
   return {
     user: join(dshHome(), 'lmemory'),
-    project: join(findProjectRoot(cwd), '.dsh', 'lmemory'),
+    project: cwd === undefined ? '' : join(canonicalProjectRoot(cwd), '.dsh', 'lmemory'),
+    global: visibleGlobalDir(),
   }
 }
 
 /**
- * 由 `entry.layer` 选写根目录:project → 项目写根,否则用户写根(global / user 都落用户根)。
- * @param cwd - 当前工作目录(用于解析写根)。
+ * 由 `entry.layer` 选写根目录:global → global 根(与 cwd 无关),project → 项目写根,
+ * user → 用户写根。
+ * @param cwd - 当前工作目录(project 层需要;global/user 可为 undefined)。
  * @param layer - 记忆落点层。
  * @returns 写根目录绝对路径。
  */
-export function writeRootFor(cwd: string, layer: MemoryEntry['layer']): string {
+export function writeRootFor(cwd: string | undefined, layer: MemoryEntry['layer']): string {
   const roots = memoryWriteRoots(cwd)
+  if (layer === 'global') return roots.global
   return layer === 'project' ? roots.project : roots.user
 }
 
 /**
  * 给定 cwd 可见的全部记忆目录(低 → 高优先级,与发现合并顺序一致)。
+ * 不含 global 子目录——`loadDir` 非递归,global 目录自动被本链排除;
+ * global 条目经 {@link discoverGlobalEntries} / 各消费方显式追加(docs/global-layer-design.md §5.2)。
  * @param cwd - 当前工作目录;缺省只返回内置 + 用户级目录。
  * @returns 可见记忆目录绝对路径列表。
  */
 export function visibleMemoryDirs(cwd?: string): string[] {
   // 发现前先做旧目录一次性迁移(幂等;报告丢弃,启动期由 index.ts 显式调用并打日志)。
   migrateLegacyMemoryDirs(cwd)
-  const root = cwd === undefined ? '' : findProjectRoot(cwd)
+  migrateLegacyGlobalEntries()
+  const root = cwd === undefined ? '' : canonicalProjectRoot(cwd)
   return [
     BUILTIN_MEMORY_DIR,
     join(agentsHome(), 'lmemory'),
@@ -171,6 +202,102 @@ export function visibleMemoryDirs(cwd?: string): string[] {
 /** 读取一个 jsonl 文件并逐行解析(读即迁移,顺带补 id/schemaVersion 并落盘);文件不存在返回空。 */
 function readJsonl(jsonlPath: string): MemoryEntry[] {
   return readJsonlMigrating(jsonlPath).entries
+}
+
+/**
+ * 读取 global 目录的全部条目(docs/global-layer-design.md §5.2)。
+ * 目录即身份 + 防御性 layer 过滤(global 目录内只认 layer==='global' 的行)。
+ * @returns global 记忆条目(按文件排序后展平)。
+ */
+export function discoverGlobalEntries(): MemoryEntry[] {
+  return loadDir(visibleGlobalDir()).flatMap(file => file.entries).filter(entry => entry.layer === 'global')
+}
+
+/** catalog 格式版本(与 store.ts 的 CATALOG_VERSION 一致,docs/memory-review.md §3)。 */
+const CATALOG_VERSION = 1
+
+/** 由一层的记忆文件构建 catalog 投影(与 store.buildCatalog 同构;迁移场景的模块内私有版)。 */
+function buildCatalogProjection(files: readonly MemoryFile[]) {
+  return {
+    version: CATALOG_VERSION,
+    entries: files.flatMap(file => file.entries.map(entry => ({
+      id: entry.id,
+      file: basename(file.jsonlPath),
+      type: entry.type,
+      domain: entry.domain,
+      scope: entry.scope,
+      layer: entry.layer,
+      entry: entry.entry,
+    }))),
+  }
+}
+
+/** 全量重写一层的 `catalog.json`(输出与 store.writeCatalog 产物相等,单测锁定)。 */
+function writeCatalogProjection(dir: string, files: readonly MemoryFile[]): void {
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'catalog.json'), `${JSON.stringify(buildCatalogProjection(files), null, 2)}\n`, 'utf8')
+}
+
+/** 写一批条目到 jsonl / md 对(迁移重写用;不经 store 的 MD 静态检查——输入来自已有合法条目)。 */
+function writeEntries(jsonlPath: string, mdPath: string, entries: readonly MemoryEntry[]): void {
+  const jsonl = entries.length > 0 ? `${entries.map(serializeEntry).join('\n')}\n` : ''
+  writeFileSync(jsonlPath, jsonl, 'utf8')
+  writeFileSync(mdPath, renderMd(entries), 'utf8')
+}
+
+/** 存量 global 条目迁移报告(docs/global-layer-design.md §5.4)。 */
+export interface GlobalMigrationReport {
+  /** 移入 global 目录的条目数。 */
+  readonly moved: number
+}
+
+/**
+ * 一次性迁移(幂等):把两个用户根顶层 jsonl 中 `layer==='global'` 的行移入
+ * global 目录当天文件(按原 type),源文件重写为不含这些行的集合,随后重写
+ * 两侧 catalog。完成后「layer=global 的条目」与「global 目录的条目」恢复同一集合
+ * (docs/global-layer-design.md §5.4)。内部只用直接路径,不调 visibleMemoryDirs(防递归)。
+ * @returns 迁移报告。
+ */
+export function migrateLegacyGlobalEntries(): GlobalMigrationReport {
+  const globalDir = visibleGlobalDir()
+  const movedEntries: MemoryEntry[] = []
+  for (const root of [join(dshHome(), 'lmemory'), join(agentsHome(), 'lmemory')]) {
+    if (!existsSync(root)) continue
+    const files = loadDir(root)
+    const nextFiles: MemoryFile[] = []
+    let dirChanged = false
+    for (const file of files) {
+      const remaining = file.entries.filter(entry => entry.layer !== 'global')
+      if (remaining.length === file.entries.length) {
+        nextFiles.push(file)
+        continue
+      }
+      dirChanged = true
+      for (const entry of file.entries) {
+        if (entry.layer === 'global') movedEntries.push(entry)
+      }
+      writeEntries(file.jsonlPath, file.mdPath, remaining)
+      nextFiles.push({ ...file, entries: remaining })
+    }
+    if (dirChanged) writeCatalogProjection(root, nextFiles)
+  }
+  if (movedEntries.length === 0) return { moved: 0 }
+  // 移入 global 目录当天文件(按 type 分组追加),随后重写 global catalog。
+  mkdirSync(globalDir, { recursive: true })
+  const byType = new Map<MemoryType, MemoryEntry[]>()
+  for (const entry of movedEntries) {
+    const list = byType.get(entry.type) ?? []
+    list.push(entry)
+    byType.set(entry.type, list)
+  }
+  for (const [type, entries] of byType) {
+    const base = `${new Date().toISOString().slice(0, 10)}.${type}.remember`
+    const jsonlPath = join(globalDir, `${base}.jsonl`)
+    const mdPath = join(globalDir, `${base}.md`)
+    writeEntries(jsonlPath, mdPath, [...readJsonl(jsonlPath), ...entries])
+  }
+  writeCatalogProjection(globalDir, loadDir(globalDir))
+  return { moved: movedEntries.length }
 }
 
 /**
@@ -257,7 +384,9 @@ function degradedEntry(line: ReturnType<typeof parseRecallLine>): RecalledEntry 
  */
 export function resolveRecalled(cwd: string | undefined, lines: readonly string[]): RecalledEntry[] {
   const byId = new Map<string, { entry: MemoryEntry; file: string }>()
-  for (const file of discoverFiles(cwd)) {
+  // 逆查域 = 可见链 + global 目录(召回可见面与逆查必须同步,否则 global 召回行全降级;
+  // docs/global-layer-design.md §5.2 表)。
+  for (const file of [...discoverFiles(cwd), ...loadDir(visibleGlobalDir())]) {
     for (const entry of file.entries) {
       byId.set(entry.id, { entry, file: file.jsonlPath.split(/[\\/]/).pop()! })
     }

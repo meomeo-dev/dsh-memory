@@ -427,8 +427,8 @@ export interface RootFileRow {
 export interface RootRow {
   /** 根目录绝对路径。 */
   readonly root: string
-  /** 根类型:user / project。 */
-  readonly kind: 'user' | 'project'
+  /** 根类型:user / project / global。 */
+  readonly kind: 'user' | 'project' | 'global'
   /** 首次登记时间(epoch 毫秒)。 */
   readonly firstSeenAt: number
   /** 最近一次刷新时间(epoch 毫秒)。 */

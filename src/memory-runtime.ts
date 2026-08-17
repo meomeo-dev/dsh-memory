@@ -8,7 +8,7 @@
  * @module dsh-memory/memory-runtime
  */
 
-import { discoverFiles, findProjectRoot } from './memory-file.js'
+import { canonicalProjectRoot, discoverFiles, loadDir, visibleGlobalDir } from './memory-file.js'
 import { warmUp } from './team.js'
 import type { MemorySource, RecallTeam } from './team.js'
 import { entryLine } from './render.js'
@@ -95,19 +95,21 @@ export function createRuntimeState(): RuntimeState {
 /**
  * 把给定 cwd 可见的记忆文件转为节点分配所需的记忆源(每个文件一个源,
  * 内容为逐行条目文本 `[id|type|domain|scope] entry`,供模型挑选相关条目并照抄整行)。
+ * global 目录整体追加(concat 不合并——独立层,不与用户/项目同名文件互斥;
+ * docs/global-layer-design.md §5.2)。
  * @param cwd - 当前工作目录;缺省只含内置 + 用户级。
  * @returns 记忆源列表。
  */
 export function sourcesFor(cwd: string | undefined): MemorySource[] {
-  return discoverFiles(cwd).map(file => ({
+  return [...discoverFiles(cwd), ...loadDir(visibleGlobalDir())].map(file => ({
     id: file.jsonlPath,
     text: file.entries.map(entryLine).join('\n'),
   }))
 }
 
-/** 由 cwd 得 project root(无 cwd 时为空串)。 */
+/** 由 cwd 得 project root(无 cwd 时为空串);canonical 化后 symlink 与真实路径共享同一 team 缓存键。 */
 function rootFor(cwd: string | undefined): string {
-  return cwd === undefined ? '' : findProjectRoot(cwd)
+  return cwd === undefined ? '' : canonicalProjectRoot(cwd)
 }
 
 /**

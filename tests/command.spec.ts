@@ -84,6 +84,12 @@ describe('parseLmemoryCommand', () => {
     expect(parseLmemoryCommand('catalog')).toEqual({ kind: 'help' })
     expect(parseLmemoryCommand('catalog bogus')).toEqual({ kind: 'help' })
   })
+
+  it('parses catalog rebuild --root (path with spaces preserved)', () => {
+    expect(parseLmemoryCommand('catalog rebuild --root ~/.dsh/lmemory/global')).toEqual({ kind: 'catalog', root: '~/.dsh/lmemory/global' })
+    expect(parseLmemoryCommand('catalog rebuild --root /Users/me/My Project/.dsh/lmemory')).toEqual({ kind: 'catalog', root: '/Users/me/My Project/.dsh/lmemory' })
+    expect(parseLmemoryCommand('catalog rebuild --root')).toEqual({ kind: 'catalog' })
+  })
 })
 
 describe('renderHelp', () => {

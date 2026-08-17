@@ -117,7 +117,7 @@ export function CollectionsPage({ bootstrap }: { readonly bootstrap: Bootstrap }
         : view.roots.map(root => (
           <section className="card root-card" key={root.root}>
             <header>
-              <span className={`badge ${root.kind === 'user' ? 'rules' : 'lessons'}`}>{root.kind}</span>
+              <span className={`badge ${root.kind === 'user' ? 'rules' : root.kind === 'project' ? 'lessons' : 'layer'}`}>{root.kind}</span>
               <span className="mono root-path">{root.root}</span>
               <span className={`state-dot ${root.exists ? 'ok' : 'gone'}`} title={root.exists ? '目录存在' : '目录已消失(保留最后已知计数)'} />
             </header>

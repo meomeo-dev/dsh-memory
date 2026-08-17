@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -15,8 +15,9 @@ const saved = { dsh: process.env.DSH_HOME, agents: process.env.DSH_AGENTS_HOME }
 beforeEach(() => {
   dshHome = mkdtempSync(join(tmpdir(), 'dsh-memory-col-dsh-'))
   agentsHome = mkdtempSync(join(tmpdir(), 'dsh-memory-col-agents-'))
-  projectA = mkdtempSync(join(tmpdir(), 'dsh-memory-col-a-'))
-  projectB = mkdtempSync(join(tmpdir(), 'dsh-memory-col-b-'))
+  // 项目根会被 canonicalProjectRoot realpath 化(macOS /tmp → /private/tmp),测试侧先归一。
+  projectA = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-memory-col-a-')))
+  projectB = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-memory-col-b-')))
   outDir = mkdtempSync(join(tmpdir(), 'dsh-memory-col-out-'))
   process.env.DSH_HOME = dshHome
   process.env.DSH_AGENTS_HOME = agentsHome

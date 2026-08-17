@@ -8,16 +8,16 @@
  * @module dsh-memory/registry
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { agentsHome, dshHome, findProjectRoot } from './memory-file.js'
+import { agentsHome, canonicalProjectRoot, dshHome, visibleGlobalDir } from './memory-file.js'
 import { countValidJsonlRows } from './migrate.js'
 
 /** registry 格式版本(结构变化时递增;读取端只认格式,不认识则视为空表)。 */
 export const REGISTRY_FORMAT_VERSION = 1
 
-/** 记忆根类型。 */
-export type RegistryRootKind = 'user' | 'project'
+/** 记忆根类型(user / project / global)。 */
+export type RegistryRootKind = 'user' | 'project' | 'global'
 
 /** 一个已登记的记忆根。 */
 export interface RegistryRoot {
@@ -66,7 +66,7 @@ function parseRegistry(text: string): Registry {
     for (const entry of roots) {
       if (typeof entry !== 'object' || entry === null) continue
       const { root, kind, firstSeenAt, lastSeenAt, entries, files } = entry as Record<string, unknown>
-      if (typeof root !== 'string' || (kind !== 'user' && kind !== 'project')) continue
+      if (typeof root !== 'string' || (kind !== 'user' && kind !== 'project' && kind !== 'global')) continue
       if (typeof firstSeenAt !== 'number' || typeof lastSeenAt !== 'number') continue
       if (typeof entries !== 'number' || typeof files !== 'number') continue
       parsed.push({ root, kind, firstSeenAt, lastSeenAt, entries, files })
@@ -166,9 +166,9 @@ function upsertRoot(registry: Registry, root: string, kind: RegistryRootKind, no
   return { root, kind, firstSeenAt: now, lastSeenAt: now, entries, files }
 }
 
-/** 固定根候选(用户两层):dsh home 与 agents home 下的 lmemory 目录。 */
+/** 固定根候选(用户两层 + global 目录):dsh home 与 agents home 下的 lmemory 目录,及 global 目录。 */
 function fixedRoots(): string[] {
-  return [join(dshHome(), 'lmemory'), join(agentsHome(), 'lmemory')]
+  return [join(dshHome(), 'lmemory'), join(agentsHome(), 'lmemory'), visibleGlobalDir()]
 }
 
 /**
@@ -183,29 +183,69 @@ function fixedRoots(): string[] {
 export function refreshRegistry(cwd?: string, now: number = Date.now()): Registry {
   const registry = loadRegistry()
   const next: RegistryRoot[] = []
-  // 固定根(存在才登记;不存在则丢弃登记,避免空目录噪音)。
+  // 固定根(存在才登记;不存在则丢弃登记,避免空目录噪音);global 目录 kind='global'。
   for (const root of fixedRoots()) {
     if (!existsSync(root)) continue
-    next.push(upsertRoot(registry, root, 'user', now))
+    const kind: RegistryRootKind = root === visibleGlobalDir() ? 'global' : 'user'
+    next.push(upsertRoot(registry, root, kind, now))
   }
-  // 项目根(cwd 提供时):无条件登记——自动提取是异步的,session-start 时刻
+  // 项目根(cwd 提供时,canonical 锚定):无条件登记——自动提取是异步的,session-start 时刻
   // 项目 lmemory 目录往往尚未创建;先按路径登记(0/0),目录出现后由后续
   // 刷新(如提取写盘后的 refreshRegistry)更新计数。
   if (cwd !== undefined) {
-    const projectRoot = findProjectRoot(cwd)
+    const projectRoot = canonicalProjectRoot(cwd)
     for (const root of [join(projectRoot, '.dsh', 'lmemory'), join(projectRoot, '.agents', 'lmemory')]) {
       next.push(upsertRoot(registry, root, 'project', now))
     }
   }
-  // 历史根:仍存在的重算计数,已消失的保持最后已知值。
+  // 历史根:project 根 canonical 归一合并(同一物理项目经 symlink 与真实路径只保留一条,
+  // root 改写为 canonical 路径、firstSeenAt 取最早;docs/global-layer-design.md §6.2.2);
+  // 已消失的根保持最后已知路径(不做 realpath)。
   const seen = new Set(next.map(entry => entry.root))
+  const byCanonical = new Map<string, RegistryRoot>()
+  for (const entry of next) {
+    if (entry.kind !== 'project') continue
+    try {
+      byCanonical.set(realpathSync(entry.root), entry)
+    } catch {
+      // 新登记根刚 upsert,磁盘存在;失败仅当极端竞态,按词法路径处理。
+    }
+  }
   for (const entry of registry.roots) {
     if (seen.has(entry.root)) continue
-    if (existsSync(entry.root)) {
-      next.push(upsertRoot(registry, entry.root, entry.kind, now))
-    } else {
+    if (!existsSync(entry.root)) {
       next.push(entry)
+      continue
     }
+    if (entry.kind !== 'project') {
+      next.push(upsertRoot(registry, entry.root, entry.kind, now))
+      continue
+    }
+    let canonical = entry.root
+    try {
+      canonical = realpathSync(entry.root)
+    } catch {
+      // 回退词法路径。
+    }
+    const existing = byCanonical.get(canonical)
+    if (existing === undefined) {
+      const fresh = upsertRoot(registry, canonical, 'project', now)
+      next.push(fresh)
+      byCanonical.set(canonical, fresh)
+      continue
+    }
+    const { entries, files } = scanRoot(canonical)
+    const merged: RegistryRoot = {
+      ...existing,
+      root: canonical,
+      firstSeenAt: Math.min(existing.firstSeenAt, entry.firstSeenAt),
+      lastSeenAt: now,
+      entries,
+      files,
+    }
+    const index = next.findIndex(item => item.root === existing.root)
+    if (index >= 0) next[index] = merged
+    byCanonical.set(canonical, merged)
   }
   const result: Registry = { formatVersion: REGISTRY_FORMAT_VERSION, updatedAt: now, roots: next }
   saveRegistry(result)
@@ -230,16 +270,18 @@ export function forgetRoot(root: string, now: number = Date.now()): boolean {
  * 手动登记一个根(`/lmemory collections add` 入口)。
  *
  * 不校验目录内容(调用方先经 {@link isMemoryRoot} 判定);kind 由路径判定:
- * 恰为两个固定用户根之一算 user,其余一律 project。
+ * 恰为两个固定用户根之一算 user,恰为 global 目录算 global,其余一律 project。
  * @param root - 根路径(绝对化后存储)。
  * @param now - 登记时刻(测试注入)。
  * @returns 登记后的注册表。
  */
 export function registerExplicitRoot(root: string, now: number = Date.now()): Registry {
   const resolved = resolve(root)
-  const kind: RegistryRootKind = resolved === join(dshHome(), 'lmemory') || resolved === join(agentsHome(), 'lmemory')
-    ? 'user'
-    : 'project'
+  const kind: RegistryRootKind = resolved === visibleGlobalDir()
+    ? 'global'
+    : resolved === join(dshHome(), 'lmemory') || resolved === join(agentsHome(), 'lmemory')
+      ? 'user'
+      : 'project'
   const registry = loadRegistry()
   const next = [...registry.roots.filter(entry => entry.root !== resolved), upsertRoot(registry, resolved, kind, now)]
   const result: Registry = { formatVersion: REGISTRY_FORMAT_VERSION, updatedAt: now, roots: next }

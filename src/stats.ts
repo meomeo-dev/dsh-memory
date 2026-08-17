@@ -10,7 +10,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { discoverFiles, loadDir, visibleMemoryDirs } from './memory-file.js'
+import { discoverFiles, loadDir, visibleGlobalDir, visibleMemoryDirs } from './memory-file.js'
 import type { MemoryFile } from './memory-file.js'
 import type { DomainId, LayerId, MemoryType } from './schema.js'
 
@@ -52,12 +52,16 @@ function readCatalogEntries(dir: string): number {
 }
 
 /**
- * 计算给定 cwd 可见的全部记忆的统计。
- * @param cwd - 当前工作目录;缺省只统计内置 + 用户级。
+ * 计算给定 cwd 可见的全部记忆的统计(含 global 目录,直接追加不合并;
+ * docs/global-layer-design.md §5.2)。
+ * @param cwd - 当前工作目录;缺省只统计内置 + 用户级 + global。
  * @returns 统计结果(无记忆时各项为 0 / 空)。
  */
 export function computeStats(cwd?: string): MemoryStats {
-  return aggregateStats(discoverFiles(cwd), visibleMemoryDirs(cwd))
+  return aggregateStats(
+    [...discoverFiles(cwd), ...loadDir(visibleGlobalDir())],
+    [...visibleMemoryDirs(cwd), visibleGlobalDir()],
+  )
 }
 
 /**

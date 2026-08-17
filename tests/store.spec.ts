@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { checkMarkdown } from '../src/check.js'
-import { builtinMemoryDir, memoryWriteRoots } from '../src/memory-file.js'
+import { builtinMemoryDir, memoryWriteRoots, visibleGlobalDir } from '../src/memory-file.js'
 import { isMemoryId } from '../src/schema.js'
-import type { MemoryEntryInput, MemoryId } from '../src/schema.js'
-import { append, find, findIn, rebuild, remove, removeByEntry, update } from '../src/store.js'
+import type { MemoryEntry, MemoryEntryInput, MemoryId } from '../src/schema.js'
+import { append, appendImported, find, findIn, rebuild, remove, removeByEntry, update } from '../src/store.js'
 
 function candidate(overrides: Partial<MemoryEntryInput> = {}): MemoryEntryInput {
   return {
@@ -33,6 +33,23 @@ function readAllJsonlLines(dir: string): string[] {
     lines.push(...readFileSync(join(dir, name), 'utf8').split('\n').filter(line => line.trim().length > 0))
   }
   return lines
+}
+
+/** 一条带原始 id / createdAt 的 global 条目(导入防线已过的形态)。 */
+function importedEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+  return {
+    id: 'm-0000000001' as MemoryId,
+    schemaVersion: 2,
+    createdAt: 1750000000000,
+    type: 'lessons',
+    domain: 'PastFixes',
+    scope: '全项目',
+    layer: 'global',
+    entry: '导入的坑',
+    entryPoint: '-',
+    references: '-',
+    ...overrides,
+  }
 }
 
 let dshHome: string
@@ -119,6 +136,58 @@ describe('append', () => {
     const found = find(project, { id: result.entry.id })
     expect(found[0]!.entry.entryPoint).toBe('CLAUDE.md')
     expect(found[0]!.entry.references).toBe('<repo>/docs/concept.md')
+  })
+
+  it('routes global-layer entries to the global dir regardless of cwd', () => {
+    const result = append(undefined, candidate({ layer: 'global' }))
+    expect(result.duplicate).toBe(false)
+    expect(result.jsonlPath).toContain(visibleGlobalDir())
+    const catalog = readCatalog(visibleGlobalDir())!
+    expect(catalog.entries).toHaveLength(1)
+    expect(catalog.entries[0]!.layer).toBe('global')
+  })
+})
+
+describe('appendImported', () => {
+  it('preserves original id / createdAt / schemaVersion and writes the catalog', () => {
+    const result = appendImported(visibleGlobalDir(), [importedEntry()])
+    expect(result).toEqual({ imported: 1, duplicates: 0 })
+    const lines = readAllJsonlLines(visibleGlobalDir())
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('"id":"m-0000000001"')
+    expect(lines[0]).toContain('"createdAt":1750000000000')
+    expect(lines[0]).toContain('"schemaVersion":2')
+    const catalog = readCatalog(visibleGlobalDir())!
+    expect(catalog.entries).toHaveLength(1)
+    expect(catalog.entries[0]!.id).toBe('m-0000000001')
+  })
+
+  it('skips same-id conflicts as duplicates without regenerating ids', () => {
+    expect(appendImported(visibleGlobalDir(), [importedEntry()])).toEqual({ imported: 1, duplicates: 0 })
+    const second = appendImported(visibleGlobalDir(), [
+      importedEntry({ entry: '不同内容同 id' }),
+      importedEntry({ id: 'm-0000000002' as MemoryId, entry: '第二条' }),
+    ])
+    expect(second).toEqual({ imported: 1, duplicates: 1 })
+    expect(readAllJsonlLines(visibleGlobalDir())).toHaveLength(2)
+  })
+
+  it('returns zeros for an empty batch without creating anything', () => {
+    expect(appendImported(visibleGlobalDir(), [])).toEqual({ imported: 0, duplicates: 0 })
+    expect(existsSync(visibleGlobalDir())).toBe(false)
+  })
+})
+
+describe('rebuild scopes', () => {
+  it('explicit dirs rebuild only those dirs; the default path never touches the global dir', () => {
+    appendImported(visibleGlobalDir(), [importedEntry()])
+    rmSync(join(visibleGlobalDir(), 'catalog.json'))
+
+    rebuild(project) // 默认路径:用户层 + 项目层,不含 global。
+    expect(existsSync(join(visibleGlobalDir(), 'catalog.json'))).toBe(false)
+
+    rebuild(undefined, [visibleGlobalDir()]) // 显式指定即重建。
+    expect(readCatalog(visibleGlobalDir())!.entries).toHaveLength(1)
   })
 })
 

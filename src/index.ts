@@ -37,7 +37,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
 import { formatCreatedAt, renderSummary } from './render.js'
-import { builtinMemoryDir, discoverEntries, migrateLegacyMemoryDirs, resolveRecalled } from './memory-file.js'
+import { builtinMemoryDir, discoverEntries, migrateLegacyGlobalEntries, migrateLegacyMemoryDirs, resolveRecalled, visibleGlobalDir } from './memory-file.js'
 import type { RecalledEntry } from './memory-file.js'
 import { append, find, findIn, rebuild, remove, removeByEntry, update } from './store.js'
 import { recall as recallTeam } from './team.js'
@@ -1017,7 +1017,7 @@ async function handleCommand(
         return { kind: 'success', text: `review 完成,发现 ${findings.length} 处,报告已注入会话` }
       }
       case 'catalog': {
-        rebuild(cwd)
+        rebuild(cwd, command.root !== undefined ? [resolve(command.root)] : undefined)
         return { kind: 'success', text: 'catalog rebuilt from jsonl.' }
       }
       case 'pricing': {
@@ -1395,6 +1395,10 @@ export function apply(ctx: Context): void {
   for (const moved of migration.moved) ctx.logger.info(`dsh-memory: migrated legacy memory dir ${moved} -> lmemory/`)
   for (const skipped of migration.skipped) ctx.logger.warn(`dsh-memory: ${skipped} does not look like a memory dir; leaving it untouched`)
 
+  // 存量 global 条目迁移(两用户根顶层 → global 目录,幂等;发现/写根咽喉也各跑一次,此处仅报告)。
+  const globalMigration = migrateLegacyGlobalEntries()
+  if (globalMigration.moved > 0) ctx.logger.info(`dsh-memory: migrated ${globalMigration.moved} legacy global entries -> ${visibleGlobalDir()}`)
+
   // 注册表:启动登记用户根;每次会话开始登记项目根(惰性发现,docs/storage-and-collections.md §Q2)。
   refreshRegistry()
   ctx.on('agent/session-start', ({ agent }) => {
@@ -1428,7 +1432,7 @@ export function apply(ctx: Context): void {
     ctx.commands.register({
       name: 'lmemory',
       description: 'manage long-term memory (status / stats / usage / ui / team / query / config / review / catalog / collections / pricing)',
-      input: { hint: 'status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | collections list|add|forget|export | pricing | help [command]' },
+      input: { hint: 'status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild [--root <path>] | collections list|add|forget|export | pricing | help [command]' },
       handler: invocation => handleCommand(ctx, runtime, scope, invocation),
     })
 

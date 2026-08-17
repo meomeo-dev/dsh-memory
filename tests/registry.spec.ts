@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -8,11 +8,12 @@ import {
   loadRegistry,
   refreshRegistry,
   registerExplicitRoot,
+  REGISTRY_FORMAT_VERSION,
   scanRootDetail,
   saveRegistry,
   scanRoot,
 } from '../src/registry.js'
-import { memoryWriteRoots } from '../src/memory-file.js'
+import { memoryWriteRoots, visibleGlobalDir } from '../src/memory-file.js'
 
 let dshHome: string
 let agentsHome: string
@@ -22,7 +23,8 @@ const saved = { dsh: process.env.DSH_HOME, agents: process.env.DSH_AGENTS_HOME }
 beforeEach(() => {
   dshHome = mkdtempSync(join(tmpdir(), 'dsh-memory-reg-dsh-'))
   agentsHome = mkdtempSync(join(tmpdir(), 'dsh-memory-reg-agents-'))
-  project = mkdtempSync(join(tmpdir(), 'dsh-memory-reg-proj-'))
+  // 项目根会被 canonicalProjectRoot realpath 化(macOS /tmp → /private/tmp),测试侧先归一。
+  project = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-memory-reg-proj-')))
   process.env.DSH_HOME = dshHome
   process.env.DSH_AGENTS_HOME = agentsHome
 })
@@ -147,6 +149,59 @@ describe('refreshRegistry', () => {
     expect(proj.entries).toBe(4) // 最后已知计数保留。
     expect(proj.lastSeenAt).toBe(NOW) // lastSeenAt 不更新。
   })
+
+  it('registers the global dir as kind=global once it exists', () => {
+    // 从未创建过 global 目录时,不登记(与固定根一致的防噪音语义)。
+    expect(refreshRegistry(project, NOW).roots.some(root => root.root === visibleGlobalDir())).toBe(false)
+
+    const globalDir = visibleGlobalDir()
+    mkdirSync(globalDir, { recursive: true })
+    seedJsonl(globalDir, 1)
+    const registry = refreshRegistry(project, NOW + 1)
+    const globalRoot = registry.roots.find(root => root.root === globalDir)!
+    expect(globalRoot.kind).toBe('global')
+    expect(globalRoot.entries).toBe(1)
+    // 目录消失后按历史根保留(与项目根一致的最后已知语义)。
+    rmSync(globalDir, { recursive: true, force: true })
+    const kept = refreshRegistry(project, NOW + 2).roots.find(root => root.root === globalDir)!
+    expect(kept.kind).toBe('global')
+    expect(kept.lastSeenAt).toBe(NOW + 1)
+  })
+
+  it('merges a stale symlink-path project root into the canonical one (earliest firstSeenAt wins)', () => {
+    const link = join(tmpdir(), `dsh-memory-reg-link-${process.pid}`)
+    symlinkSync(project, link)
+    seedJsonl(join(project, '.dsh', 'lmemory'), 2)
+    // 手动种一条旧版词法路径根(未经 canonical 化的历史数据)。
+    saveRegistry({
+      formatVersion: REGISTRY_FORMAT_VERSION,
+      updatedAt: NOW - 1000,
+      roots: [{ root: join(link, '.dsh', 'lmemory'), kind: 'project', firstSeenAt: NOW - 5000, lastSeenAt: NOW - 5000, entries: 2, files: 1 }],
+    })
+    const refreshed = refreshRegistry(project, NOW)
+    // .dsh 根合并为一条 canonical 记录,词法 symlink 路径不再保留。
+    const merged = refreshed.roots.find(root => root.root === join(project, '.dsh', 'lmemory'))!
+    expect(merged.kind).toBe('project')
+    expect(merged.firstSeenAt).toBe(NOW - 5000)
+    expect(merged.entries).toBe(2)
+    expect(refreshed.roots.some(root => root.root === join(link, '.dsh', 'lmemory'))).toBe(false)
+    rmSync(link, { force: true })
+  })
+
+  it('keeps the lexical path of a vanished project root (no realpath on gone dirs)', () => {
+    const gone = mkdtempSync(join(tmpdir(), 'dsh-memory-reg-gone-'))
+    const lexicalRoot = join(gone, '.dsh', 'lmemory')
+    saveRegistry({
+      formatVersion: REGISTRY_FORMAT_VERSION,
+      updatedAt: NOW - 1000,
+      roots: [{ root: lexicalRoot, kind: 'project', firstSeenAt: NOW - 5000, lastSeenAt: NOW - 5000, entries: 1, files: 1 }],
+    })
+    rmSync(gone, { recursive: true, force: true })
+    const refreshed = refreshRegistry(project, NOW)
+    const kept = refreshed.roots.find(root => root.root === lexicalRoot)!
+    expect(kept.entries).toBe(1) // 词法路径原样保留。
+    expect(kept.lastSeenAt).toBe(NOW - 5000)
+  })
 })
 
 describe('registerExplicitRoot / forgetRoot', () => {
@@ -166,5 +221,12 @@ describe('registerExplicitRoot / forgetRoot', () => {
   it('classifies the fixed user roots as kind user', () => {
     const registry = registerExplicitRoot(join(dshHome, 'lmemory'), NOW)
     expect(registry.roots.find(entry => entry.root === join(dshHome, 'lmemory'))!.kind).toBe('user')
+  })
+
+  it('classifies the global dir as kind global', () => {
+    const globalDir = visibleGlobalDir()
+    mkdirSync(globalDir, { recursive: true })
+    const registry = registerExplicitRoot(globalDir, NOW)
+    expect(registry.roots.find(entry => entry.root === globalDir)!.kind).toBe('global')
   })
 })

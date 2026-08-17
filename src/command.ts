@@ -28,7 +28,7 @@ export type LmemoryCommand =
   | { readonly kind: 'config-get'; readonly key?: string }
   | { readonly kind: 'config-set'; readonly key: string; readonly value: string }
   | { readonly kind: 'review'; readonly filter?: ReviewFilter }
-  | { readonly kind: 'catalog' }
+  | { readonly kind: 'catalog'; readonly root?: string }
   | { readonly kind: 'pricing' }
   | {
     readonly kind: 'collections'
@@ -39,7 +39,7 @@ export type LmemoryCommand =
   }
 
 /** 命令用法回显文案。 */
-export const USAGE = 'Usage: /lmemory status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild | collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...] | pricing | help [command]'
+export const USAGE = 'Usage: /lmemory status | stats | usage [--days N] | ui | team start|stop|restart | query <text> | config get|set <key> [value] | review [layer|domain] | catalog rebuild [--root <path>] | collections list|add <root>|forget <root>|export [--out <dir>] [--root <path>...] | pricing | help [command]'
 
 /** 一条子命令的帮助详情(供 `/lmemory help [command]`)。 */
 export interface CommandHelp {
@@ -111,11 +111,13 @@ export const COMMAND_HELPS: ReadonlyMap<string, CommandHelp> = new Map([
     ],
   }],
   ['catalog', {
-    usage: 'catalog rebuild',
+    usage: 'catalog rebuild [--root <path>]',
     summary: '从全部 jsonl 重建 catalog(派生索引)。',
     details: [
-      '行为:全量重写用户层 + 当前项目层的 catalog.json;真相源仍是 jsonl;内置层只读,不重建。',
+      '行为:默认全量重写用户层 + 当前项目层的 catalog.json;真相源仍是 jsonl;内置层只读,不重建。',
+      '--root <path>:只重建给定记忆根目录(显式指定即重建,含 global 目录;docs/global-layer-design.md §5.5)。',
       '示例:/lmemory catalog rebuild',
+      '示例:/lmemory catalog rebuild --root ~/.dsh/lmemory/global',
     ],
   }],
   ['pricing', {
@@ -221,6 +223,9 @@ export function parseLmemoryCommand(rawInput: string): LmemoryCommand {
     return { kind: 'help' }
   }
   if (head === 'catalog' && parts[1]?.toLowerCase() === 'rebuild') {
+    if (parts[2]?.toLowerCase() === '--root' && parts[3] !== undefined) {
+      return { kind: 'catalog', root: parts.slice(3).join(' ') }
+    }
     return { kind: 'catalog' }
   }
   if (head === 'pricing' && parts.length === 1) {

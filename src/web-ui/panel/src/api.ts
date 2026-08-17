@@ -141,7 +141,7 @@ export interface Dashboard {
 /** 目录页一个记忆根的行(镜像 host 侧 RootRow)。 */
 export interface RootRow {
   readonly root: string
-  readonly kind: 'user' | 'project'
+  readonly kind: 'user' | 'project' | 'global'
   readonly firstSeenAt: number
   readonly lastSeenAt: number
   readonly entries: number

@@ -16,7 +16,7 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { findProjectRoot } from './memory-file.js'
+import { canonicalProjectRoot } from './memory-file.js'
 import { DOMAINS, MAX_LESSON_CHARS } from './schema.js'
 import type { DomainId, LayerId, MemoryType } from './schema.js'
 
@@ -153,13 +153,13 @@ export function filterNovel(
 }
 
 /**
- * 由 cwd 推导记忆落点层:经 `.git` 向上探测到项目根 → `project`,否则 `user`。
+ * 由 cwd 推导记忆落点层:经 `.git` 向上探测到项目根(realpath 解析 symlink)→ `project`,否则 `user`。
  * 与召回预热 project-root 探测同源(docs/auto-extraction.md §5.6)。
  * @param cwd - 当前工作目录。
  * @returns 落点层。
  */
 export function deriveLayer(cwd: string): LayerId {
-  return existsSync(join(findProjectRoot(cwd), '.git')) ? 'project' : 'user'
+  return existsSync(join(canonicalProjectRoot(cwd), '.git')) ? 'project' : 'user'
 }
 
 /**

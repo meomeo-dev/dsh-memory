@@ -83,6 +83,21 @@ describe('computeStats', () => {
     expect(stats.catalogEntries).toBe(0)
     expect(stats.total).toBe(0)
   })
+
+  it('includes global dir entries and its catalog (direct append, no merge)', () => {
+    const globalDir = join(dshHome, 'lmemory', 'global')
+    mkdirSync(globalDir, { recursive: true })
+    const row = JSON.stringify({ id: 'm-0000000001', schemaVersion: 1, type: 'lessons', domain: 'PastFixes', scope: '全项目', layer: 'global', entry: '全局坑', entryPoint: '-', references: '-' })
+    writeFileSync(join(globalDir, '2026-08-14.lessons.remember.jsonl'), `${row}\n`)
+    writeFileSync(join(globalDir, '2026-08-14.lessons.remember.md'), '# md\n')
+    writeFileSync(join(globalDir, 'catalog.json'), JSON.stringify({ version: 1, entries: [{ id: 'm-0000000001' }] }))
+
+    const stats = computeStats(project)
+    expect(stats.total).toBe(1)
+    expect(stats.byLayer.global).toBe(1)
+    expect(stats.files).toBe(1)
+    expect(stats.catalogEntries).toBe(1)
+  })
 })
 
 describe('computeStatsIn', () => {

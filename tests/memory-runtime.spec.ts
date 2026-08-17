@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -18,7 +18,8 @@ const saved = { dsh: process.env.DSH_HOME }
 
 beforeEach(() => {
   dshHome = mkdtempSync(join(tmpdir(), 'dsh-memory-rt-dsh-'))
-  project = mkdtempSync(join(tmpdir(), 'dsh-memory-rt-proj-'))
+  // 项目根会被 canonicalProjectRoot realpath 化(macOS /tmp → /private/tmp),测试侧先归一。
+  project = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-memory-rt-proj-')))
   process.env.DSH_HOME = dshHome
 })
 
@@ -45,6 +46,20 @@ describe('sourcesFor', () => {
     const sources = sourcesFor(project)
     expect(sources).toHaveLength(1)
     expect(sources[0]!.text).toBe('[m-0000000000|rules|Style|全项目] 两空格缩进')
+  })
+
+  it('appends the global dir as separate sources (concat, no basename merge)', () => {
+    seedProjectFile('两空格缩进')
+    const globalDir = join(dshHome, 'lmemory', 'global')
+    mkdirSync(globalDir, { recursive: true })
+    writeFileSync(
+      join(globalDir, '2026-08-14.lessons.remember.jsonl'),
+      `${JSON.stringify({ id: 'm-0000000001', schemaVersion: 1, createdAt: 1750000000000, type: 'lessons', domain: 'PastFixes', scope: '全项目', layer: 'global', entry: '全局坑', entryPoint: '-', references: '-' })}\n`,
+      'utf8',
+    )
+    const sources = sourcesFor(project)
+    expect(sources).toHaveLength(2)
+    expect(sources[1]!.text).toBe('[m-0000000001|lessons|PastFixes|全项目] 全局坑')
   })
 })
 
