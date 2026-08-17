@@ -12,12 +12,16 @@ import { canonicalProjectRoot, discoverFiles, loadDir, visibleGlobalDir } from '
 import { warmUp } from './team.js'
 import type { MemorySource, RecallTeam } from './team.js'
 import { entryLine } from './render.js'
+import type { SummaryMode } from './render.js'
 
 /** 自动提取触发形态枚举(docs/auto-extraction.md §3)。 */
 export const EXTRACT_MODES = ['signal', 'counter', 'event-counter'] as const
 
 /** 自动提取触发形态。 */
 export type ExtractMode = (typeof EXTRACT_MODES)[number]
+
+/** 注入摘要模式枚举(docs/global-layer-design.md §6.1)。 */
+export const SUMMARY_MODES = ['global', 'all'] as const satisfies readonly SummaryMode[]
 
 /** rules 抽取器默认提示词(docs/auto-extraction.md §5.3)。 */
 const DEFAULT_EXTRACT_RULES_PROMPT = '你是「用户偏好(rules)」抽取器。给定一段对话,找出用户明确表达或隐含的长期偏好、习惯、格式、技术栈限制、共识、约束。只输出值得长期记住的条目,一行一条,格式为「domain|scope|entry|entryPoint|references」,domain 从已知领域枚举中选最贴切的一个(如 DurablePrefs、CodeFacts、Style),scope 填这条记忆影响的具体子系统 / 模块(自由文本,如「全项目」「Web UI」),entry 填一句话条目(不含竖线 |),entryPoint 填这条记忆的来源文件路径(对话中出现的真实路径,如 src/index.ts),references 填相关参考文件路径;entryPoint / references 没有对应路径时填 -。没有值得记的输出空。禁止记录:操作流水账、思考过程、具体代码实现、密钥或凭据、易变的进度/待办。'
@@ -56,6 +60,8 @@ export interface MemoryConfig {
   extractRulesPrompt: string
   /** lessons 抽取器提示词模板。 */
   extractLessonsPrompt: string
+  /** system prompt 注入摘要模式('global' 只注入 global 全文 + user/project 计数;'all' 旧全量行为)。 */
+  summaryMode: SummaryMode
 }
 
 /** 召回默认配置(设计文档 §9 的起点,含自动提取配置 auto-extraction.md §7)。 */
@@ -73,10 +79,11 @@ export const DEFAULT_CONFIG: MemoryConfig = {
   signalWords: DEFAULT_SIGNAL_WORDS,
   extractRulesPrompt: DEFAULT_EXTRACT_RULES_PROMPT,
   extractLessonsPrompt: DEFAULT_EXTRACT_LESSONS_PROMPT,
+  summaryMode: 'global',
 }
 
 /** 可经 `/lmemory config get|set` 读写的配置键。 */
-export const CONFIG_KEYS = ['maxNodeKb', 'recallTopK', 'rerankPrompt', 'warmupOnStart', 'provider', 'model', 'reviewModel', 'autoExtract', 'extractMode', 'extractInterval', 'signalWords', 'extractRulesPrompt', 'extractLessonsPrompt'] as const
+export const CONFIG_KEYS = ['maxNodeKb', 'recallTopK', 'rerankPrompt', 'warmupOnStart', 'provider', 'model', 'reviewModel', 'autoExtract', 'extractMode', 'extractInterval', 'signalWords', 'extractRulesPrompt', 'extractLessonsPrompt', 'summaryMode'] as const
 
 /** 一个配置键。 */
 export type ConfigKey = (typeof CONFIG_KEYS)[number]

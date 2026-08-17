@@ -74,3 +74,59 @@ export function renderSummary(entries: readonly MemoryEntry[]): string {
   if (entries.length === 0) return ''
   return entries.map(entry => `- [${entry.type}] ${entry.entry}`).join('\n')
 }
+
+/**
+ * system prompt 注入的 global 全文条目数上限;超过时注明「更早的 global 记忆
+ * 经 recall 获取」(docs/global-layer-design.md §6.1)。
+ * 哨兵值而非调优旋钮(注入预算固定,调整语义用 summaryMode),故为常量而非配置项,
+ * 类比 {@link ../extract.js} 的 MIN_TRANSCRIPT_CHARS 先例。
+ */
+export const GLOBAL_INJECT_MAX = 30
+
+/** 注入摘要模式:'global' 只注入 global 全文 + user/project 计数;'all' 沿用旧全量行为。 */
+export type SummaryMode = 'global' | 'all'
+
+/** 按 domain 计数降序(同计数按 domain 名升序)渲染一条统计行;无条目返回 undefined。 */
+function renderDomainCounts(entries: readonly MemoryEntry[], label: string): string | undefined {
+  if (entries.length === 0) return undefined
+  const counts = new Map<string, number>()
+  for (const entry of entries) counts.set(entry.domain, (counts.get(entry.domain) ?? 0) + 1)
+  const parts = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([domain, count]) => `${domain} ×${count}`)
+  return `（${label}记忆 ${entries.length} 条:${parts.join(',')}）`
+}
+
+/**
+ * 渲染 system prompt 注入用的记忆摘要(docs/global-layer-design.md §6.1)。
+ *
+ * mode='global'(默认):global 条目全文(createdAt 降序、同刻按 id 升序定序、
+ * 截断 {@link GLOBAL_INJECT_MAX},超限附「更早条目经 recall 获取」注记)+
+ * 用户记忆 domain 计数行 + 当前工作区 project 记忆 domain 计数行(计数降序、
+ * 全部 domain 列出)。mode='all':返回 {@link renderSummary} 的旧全量行为。
+ * 退化规则:global 0 条只输出统计行;project 0 条省略该行;全部为 0 输出空串。
+ * @param entries - 归一化后的记忆条目(调用方已合并可见链与 global 目录)。
+ * @param mode - 注入模式。
+ * @param maxInject - global 全文条目数上限(测试注入;缺省 {@link GLOBAL_INJECT_MAX})。
+ * @returns 多行摘要文本,或空串。
+ */
+export function renderMemorySummary(entries: readonly MemoryEntry[], mode: SummaryMode, maxInject: number = GLOBAL_INJECT_MAX): string {
+  if (mode === 'all') return renderSummary(entries)
+  const global = entries.filter(entry => entry.layer === 'global')
+  const user = entries.filter(entry => entry.layer === 'user')
+  const project = entries.filter(entry => entry.layer === 'project')
+  const lines: string[] = []
+  const sorted = [...global].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const capped = sorted.slice(0, maxInject)
+  if (capped.length > 0) {
+    lines.push(...capped.map(entry => `- [${entry.type}] ${entry.entry}`))
+    if (sorted.length > maxInject) {
+      lines.push(`（更早的 ${sorted.length - maxInject} 条 global 记忆经 recall 获取）`)
+    }
+  }
+  const userLine = renderDomainCounts(user, '用户')
+  if (userLine !== undefined) lines.push(userLine)
+  const projectLine = renderDomainCounts(project, '当前工作区 project ')
+  if (projectLine !== undefined) lines.push(projectLine)
+  return lines.join('\n')
+}

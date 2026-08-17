@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  CONFIG_KEYS,
   createRuntimeState,
   DEFAULT_CONFIG,
   ensureTeam,
   restartTeam,
   sourcesFor,
   stopTeams,
+  SUMMARY_MODES,
   teamStatus,
 } from '../src/memory-runtime.js'
 
@@ -60,6 +62,14 @@ describe('sourcesFor', () => {
     const sources = sourcesFor(project)
     expect(sources).toHaveLength(2)
     expect(sources[1]!.text).toBe('[m-0000000001|lessons|PastFixes|全项目] 全局坑')
+  })
+})
+
+describe('config contract', () => {
+  it('DEFAULT_CONFIG covers every CONFIG_KEYS entry with summaryMode defaulting to global', () => {
+    expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([...CONFIG_KEYS].sort())
+    expect(DEFAULT_CONFIG.summaryMode).toBe('global')
+    expect(SUMMARY_MODES).toEqual(['global', 'all'])
   })
 })
 

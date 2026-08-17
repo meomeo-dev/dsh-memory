@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { DOMAINS, LAYERS, MEMORY_TYPES } from '../schema.js'
 import type { DomainId, LayerId, MemoryEntry, MemoryType } from '../schema.js'
-import { CONFIG_KEYS, EXTRACT_MODES } from '../memory-runtime.js'
+import { CONFIG_KEYS, EXTRACT_MODES, SUMMARY_MODES } from '../memory-runtime.js'
 import type { ConfigKey, MemoryConfig, TeamStatus } from '../memory-runtime.js'
 import type { MemoryStats, UsageCounter } from '../stats.js'
 import type { ProcessRow } from '../runtime-status.js'
@@ -261,7 +261,7 @@ export interface PanelConfigMeta {
   readonly options?: readonly string[]
 }
 
-/** 13 个配置键的设置页元数据(键集合与 {@link CONFIG_KEYS} 一致,测试锁定不漂移)。 */
+/** 14 个配置键的设置页元数据(键集合与 {@link CONFIG_KEYS} 一致,测试锁定不漂移)。 */
 export const PANEL_CONFIG_META: Readonly<Record<ConfigKey, PanelConfigMeta>> = {
   maxNodeKb: { label: 'maxNodeKb', description: '每节点容量上限(Kb)', kind: 'number' },
   recallTopK: { label: 'recallTopK', description: '召回返回的最大条目数', kind: 'number' },
@@ -276,6 +276,7 @@ export const PANEL_CONFIG_META: Readonly<Record<ConfigKey, PanelConfigMeta>> = {
   signalWords: { label: 'signalWords', description: '形态 1(signal)信号词集,逗号分隔', kind: 'string' },
   extractRulesPrompt: { label: 'extractRulesPrompt', description: 'rules 抽取器提示词模板', kind: 'textarea' },
   extractLessonsPrompt: { label: 'extractLessonsPrompt', description: 'lessons 抽取器提示词模板', kind: 'textarea' },
+  summaryMode: { label: 'summaryMode', description: '注入摘要模式(global 只注入 global 全文 + 计数;all 旧全量)', kind: 'enum', options: SUMMARY_MODES },
 }
 
 /** 设置页的一个配置项(元数据 + 当前值)。 */

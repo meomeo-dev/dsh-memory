@@ -155,7 +155,7 @@ describe('panel HTML shell', () => {
 })
 
 describe('settings page description', () => {
-  it('describes exactly the 13 config keys with a label, description, and control kind', () => {
+  it('describes exactly the 14 config keys with a label, description, and control kind', () => {
     const items = describeConfig(DEFAULT_CONFIG)
     expect(items.map(item => item.key)).toEqual([...CONFIG_KEYS])
     for (const item of items) {
@@ -226,7 +226,7 @@ describe('handlePanelRpc', () => {
   it('reads and writes config through the deps', async () => {
     const get = await handlePanelRpc('config-get', { acToken: token }, token, makeDeps())
     expect(get.ok).toBe(true)
-    if (get.ok) expect((get.value as { config: unknown[] }).config).toHaveLength(13)
+    if (get.ok) expect((get.value as { config: unknown[] }).config).toHaveLength(14)
 
     let patchSeen: Record<string, unknown> | undefined
     const setDeps = makeDeps({

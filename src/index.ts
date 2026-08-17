@@ -36,8 +36,8 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 
 import { DOMAINS } from './schema.js'
 import type { DomainId, LayerId, MemoryEntryInput, MemoryType } from './schema.js'
-import { formatCreatedAt, renderSummary } from './render.js'
-import { builtinMemoryDir, discoverEntries, migrateLegacyGlobalEntries, migrateLegacyMemoryDirs, resolveRecalled, visibleGlobalDir } from './memory-file.js'
+import { formatCreatedAt, renderMemorySummary } from './render.js'
+import { builtinMemoryDir, discoverEntries, discoverGlobalEntries, migrateLegacyGlobalEntries, migrateLegacyMemoryDirs, resolveRecalled, visibleGlobalDir } from './memory-file.js'
 import type { RecalledEntry } from './memory-file.js'
 import { append, find, findIn, rebuild, remove, removeByEntry, update } from './store.js'
 import { recall as recallTeam } from './team.js'
@@ -59,6 +59,7 @@ import {
   ensureTeam,
   restartTeam,
   stopTeams,
+  SUMMARY_MODES,
   teamStatus,
 } from './memory-runtime.js'
 import type { ExtractMode, MemoryConfig, RuntimeState, TeamStatus } from './memory-runtime.js'
@@ -135,6 +136,7 @@ const SCHEMA: z<MemoryConfig> = z.object({
   signalWords: z.string().default(DEFAULT_CONFIG.signalWords),
   extractRulesPrompt: z.string().min(1).default(DEFAULT_CONFIG.extractRulesPrompt),
   extractLessonsPrompt: z.string().min(1).default(DEFAULT_CONFIG.extractLessonsPrompt),
+  summaryMode: z.union([...SUMMARY_MODES]).default(DEFAULT_CONFIG.summaryMode),
 })
 
 /** 召回节点 system prompt(固定,非配置项)。 */
@@ -324,7 +326,7 @@ function snapshotRuntime(runtime: Runtime, pid: number, startedAt: number, now: 
     ...(runtime.port === undefined ? {} : { port: runtime.port }),
     lastSeenAt: now,
     teams,
-    summaryChars: renderSummary(discoverEntries(process.cwd())).length,
+    summaryChars: summaryText(runtime.config, process.cwd()).length,
     nodes: {
       recall: { ...nodes.recall, calls: runtime.usage.get(labels[0])?.calls ?? 0 },
       extract: { ...nodes.extract, calls: runtime.usage.get(labels[1])?.calls ?? 0 },
@@ -613,7 +615,7 @@ function renderUsage(runtime: Runtime): string {
   }
   // 摘要体积按进程启动目录计算——与节点状态页/状态页 dashboard 的同一指标同口径
   // (多会话进程中各会话的摘要只在主会话注入,进程级视图以启动目录为准)。
-  const summaryChars = renderSummary(discoverEntries(process.cwd())).length
+  const summaryChars = summaryText(runtime.config, process.cwd()).length
   const labels: readonly UsageLabel[] = ['recall', 'extract', 'review']
   const callLines = labels.map((label) => {
     const counter = runtime.usage.get(label) ?? EMPTY_USAGE
@@ -786,7 +788,7 @@ function registerPanel(ctx: Context, runtime: Runtime, scope: SettingsScope<Memo
           for (const node of team.nodes) nodeChars += node.text.length
         }
         // 摘要体积是本进程的会话产物(按进程启动目录),不随 host 统计走注册表。
-        const summaryChars = renderSummary(discoverEntries(process.cwd())).length
+        const summaryChars = summaryText(runtime.config, process.cwd()).length
         // 消耗口径(docs/status-page-usage.md):totals 与 daily 同源 usage.jsonl——
         // totals 是近 14 天窗口聚合(甜甜圈/堆叠条/明细表),daily 是 84 天日聚合
         // (每日图/热力图);warmTeams/summary 是本进程实时装载,标题已标注范围。
@@ -925,7 +927,16 @@ function coerceConfigValue(key: string, raw: string): unknown {
     if ((EXTRACT_MODES as readonly string[]).includes(raw)) return raw
     throw new Error(`extractMode must be one of ${EXTRACT_MODES.join(', ')}`)
   }
+  if (key === 'summaryMode') {
+    if ((SUMMARY_MODES as readonly string[]).includes(raw)) return raw
+    throw new Error(`summaryMode must be one of ${SUMMARY_MODES.join(', ')}`)
+  }
   return raw
+}
+
+/** 注入摘要文本:与注入点同函数、同 summaryMode(docs/global-layer-design.md §6.1)。 */
+function summaryText(config: MemoryConfig, cwd: string | undefined): string {
+  return renderMemorySummary([...discoverEntries(cwd), ...discoverGlobalEntries()], config.summaryMode)
 }
 
 /** 执行一次 `/lmemory` 命令。 */
@@ -1414,7 +1425,7 @@ export function apply(ctx: Context): void {
   ctx.systemPrompt.section({
     name: 'memory:summary',
     order: 10,
-    text: (assemble) => renderSummary(discoverEntries(assemble.agent?.session.header.cwd)),
+    text: (assemble) => summaryText(runtime.config, assemble.agent?.session.header.cwd),
   })
 
   registerTools(ctx, runtime)

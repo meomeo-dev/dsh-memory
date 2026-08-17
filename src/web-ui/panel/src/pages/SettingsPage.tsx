@@ -1,5 +1,5 @@
 /**
- * 设置页:13 个配置键的表单,统一保存(config-set)。样式在 ./settings.css。
+ * 设置页:14 个配置键的表单,统一保存(config-set)。样式在 ./settings.css。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { rpc } from '../api'
@@ -36,7 +36,7 @@ function ConfigField(props: {
   }
 }
 
-/** 设置页:13 个配置键的表单,统一保存(config-set)。 */
+/** 设置页:14 个配置键的表单,统一保存(config-set)。 */
 export function SettingsPage({ bootstrap }: { readonly bootstrap: Bootstrap }): JSX.Element {
   const [items, setItems] = useState<readonly ConfigItem[]>([])
   const [values, setValues] = useState<Record<string, string>>({})
